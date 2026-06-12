@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GenNal — Run Codex, Claude & Gemini side by side</title>
+  <meta name="description" content="GenNal is a desktop cockpit for launching and managing multiple AI models — Codex, Claude, and Gemini — simultaneously on your laptop." />
+  <meta property="og:title" content="GenNal — Multi-Model AI Cockpit" />
+  <meta property="og:description" content="Launch Codex, Claude & Gemini side by side. One window. One workspace." />
+  <meta property="og:type" content="website" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ambient background -->
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <!-- NAV -->
+  <header class="nav">
+    <a class="brand" href="#top">
+      <img class="brand-mark" src="assets/gennal-logo.png" alt="GenNal logo" />
+      <span class="brand-name">GenNal</span>
+      <span class="brand-pill">Pro</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#models">Models</a>
+      <a href="#system">Requirements</a>
+      <a class="btn btn-ghost" href="#download">Download</a>
+    </nav>
+  </header>
+
+  <!-- HERO -->
+  <main id="top">
+    <section class="hero">
+      <div class="hero-copy">
+        <span class="eyebrow">● Multi-Model AI Cockpit</span>
+        <h1>Run <span class="g-codex">Codex</span>, <span class="g-claude">Claude</span> &amp;
+          <span class="g-gemini">Gemini</span><br />side by side.</h1>
+        <p class="lede">
+          One window. One workspace. Launch every AI model as its own live session,
+          compare them in real time, and broadcast a single prompt to all of them at once —
+          right on your laptop.
+        </p>
+        <div class="cta-row" id="download">
+          <a class="btn btn-primary" href="downloads/GenNal-Setup.exe" download>
+            <span class="dl-icon">⬇</span>
+            Download for Windows
+            <small>.exe · 64-bit</small>
+          </a>
+          <a class="btn btn-ghost" href="#features">See how it works</a>
+        </div>
+        <p class="meta-line">Free · Windows 10/11 · No API keys required <span class="ver">v1.0.0</span></p>
+      </div>
+
+      <!-- App mock -->
+      <div class="hero-shot" aria-hidden="true">
+        <div class="window">
+          <div class="window-bar">
+            <img class="brand-mark sm" src="assets/gennal-logo.png" alt="" /> GenNal
+            <span class="win-dots"><i></i><i></i><i></i></span>
+          </div>
+          <div class="window-body">
+            <div class="pane pane-codex"><span class="dot"></span>Codex<small>codex-cli</small></div>
+            <div class="pane pane-claude"><span class="dot"></span>Claude<small>claude-code</small></div>
+            <div class="pane pane-gemini"><span class="dot"></span>Gemini<small>gemini-cli</small></div>
+            <div class="pane pane-custom"><span class="dot"></span>Custom<small>shell</small></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section id="features" class="section">
+      <h2 class="section-title">Everything to manage many models at once</h2>
+      <div class="grid-cards">
+        <article class="card">
+          <div class="card-ico">▦</div>
+          <h3>Grid, Tabs, Stack &amp; Float</h3>
+          <p>Arrange model sessions any way you like — a 2×2 grid to watch four agents work, or stacked for focus.</p>
+        </article>
+        <article class="card">
+          <div class="card-ico">📡</div>
+          <h3>Broadcast a prompt</h3>
+          <p>Type once, send to every selected model. Compare how Codex, Claude, and Gemini each solve the same task.</p>
+        </article>
+        <article class="card">
+          <div class="card-ico">⚡</div>
+          <h3>Real terminals, real CLIs</h3>
+          <p>Each pane is a live PTY running the model's official CLI — full color, interactive prompts, start/stop/restart.</p>
+        </article>
+        <article class="card">
+          <div class="card-ico">📊</div>
+          <h3>Live system overview</h3>
+          <p>CPU, memory, and active-model counts at a glance, so three agentic CLIs never quietly choke your laptop.</p>
+        </article>
+        <article class="card">
+          <div class="card-ico">🗂</div>
+          <h3>Shared workspaces</h3>
+          <p>All sessions share one project root. Switch workspaces and your sessions and layout come right back.</p>
+        </article>
+        <article class="card">
+          <div class="card-ico">➕</div>
+          <h3>Bring your own model</h3>
+          <p>Any CLI works. Register a name, command, and args — ollama, aider, or a local script — in one config entry.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- MODELS -->
+    <section id="models" class="section">
+      <h2 class="section-title">Works with the tools you already use</h2>
+      <div class="model-row">
+        <div class="model-chip g-codex"><b>Codex</b><span>codex</span></div>
+        <div class="model-chip g-claude"><b>Claude</b><span>claude</span></div>
+        <div class="model-chip g-gemini"><b>Gemini</b><span>gemini</span></div>
+        <div class="model-chip g-custom"><b>Custom</b><span>any CLI</span></div>
+      </div>
+      <p class="note">Already logged into the CLIs? GenNal just drives them — no extra API keys, no extra billing.</p>
+    </section>
+
+    <!-- SYSTEM -->
+    <section id="system" class="section">
+      <h2 class="section-title">System requirements</h2>
+      <div class="req-grid">
+        <div class="req"><span>OS</span>Windows 10 / 11 (64-bit)</div>
+        <div class="req"><span>RAM</span>8 GB min · 16 GB recommended</div>
+        <div class="req"><span>Disk</span>500 MB</div>
+        <div class="req"><span>Needs</span>Codex / Claude / Gemini CLI on PATH</div>
+      </div>
+      <div class="download-band">
+        <div>
+          <h3>Ready to run them all at once?</h3>
+          <p>Download GenNal and launch your first multi-model workspace in under a minute.</p>
+        </div>
+        <a class="btn btn-primary" href="downloads/GenNal-Setup.exe" download>
+          <span class="dl-icon">⬇</span> Download GenNal <small>.exe</small>
+        </a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span class="brand"><img class="brand-mark sm" src="assets/gennal-logo.png" alt="" /> GenNal</span>
+    <span>© <span id="year"></span> GenNal · Multi-Model AI Cockpit</span>
+    <span class="footer-links"><a href="#features">Features</a><a href="#download">Download</a></span>
+  </footer>
+
+  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+</body>
+</html>

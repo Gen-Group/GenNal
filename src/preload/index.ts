@@ -1,0 +1,56 @@
+import { contextBridge, ipcRenderer } from 'electron'
+import type {
+  ModelDef,
+  PtyCreatePayload,
+  PtyData,
+  PtyExit,
+  SystemStats,
+  WorkspaceFile,
+  WorkspaceKind,
+  WorkspaceOpenResult,
+  WorkspaceReadResult,
+  WorkspaceWritePayload
+} from '../shared/types'
+
+const api = {
+  listModels: (): Promise<ModelDef[]> => ipcRenderer.invoke('models:list'),
+
+  openWorkspace: (kind: WorkspaceKind): Promise<WorkspaceOpenResult | null> =>
+    ipcRenderer.invoke('workspace:open', kind),
+  readWorkspaceFile: (file: WorkspaceFile): Promise<WorkspaceReadResult> =>
+    ipcRenderer.invoke('workspace:read-file', file),
+  writeWorkspaceFile: (payload: WorkspaceWritePayload): Promise<WorkspaceReadResult> =>
+    ipcRenderer.invoke('workspace:write-file', payload),
+
+  ptyCreate: (payload: PtyCreatePayload): void => ipcRenderer.send('pty:create', payload),
+  ptyInput: (id: string, data: string): void => ipcRenderer.send('pty:input', { id, data }),
+  ptyResize: (id: string, cols: number, rows: number): void =>
+    ipcRenderer.send('pty:resize', { id, cols, rows }),
+  ptyKill: (id: string): void => ipcRenderer.send('pty:kill', { id }),
+
+  onPtyData: (cb: (d: PtyData) => void): (() => void) => {
+    const handler = (_e: unknown, d: PtyData): void => cb(d)
+    ipcRenderer.on('pty:data', handler)
+    return () => ipcRenderer.removeListener('pty:data', handler)
+  },
+  onPtyExit: (cb: (d: PtyExit) => void): (() => void) => {
+    const handler = (_e: unknown, d: PtyExit): void => cb(d)
+    ipcRenderer.on('pty:exit', handler)
+    return () => ipcRenderer.removeListener('pty:exit', handler)
+  },
+  onStats: (cb: (s: SystemStats) => void): (() => void) => {
+    const handler = (_e: unknown, s: SystemStats): void => cb(s)
+    ipcRenderer.on('stats:update', handler)
+    return () => ipcRenderer.removeListener('stats:update', handler)
+  },
+
+  win: {
+    minimize: (): void => ipcRenderer.send('win:minimize'),
+    maximize: (): void => ipcRenderer.send('win:maximize'),
+    close: (): void => ipcRenderer.send('win:close')
+  }
+}
+
+contextBridge.exposeInMainWorld('api', api)
+
+export type GenNalApi = typeof api

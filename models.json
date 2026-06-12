@@ -1,0 +1,6 @@
+[
+  { "id": "claude", "label": "Claude", "tag": "claude-code", "command": "claude", "accent": "#D97757" },
+  { "id": "codex",  "label": "Codex",  "tag": "codex-cli",   "command": "codex",  "accent": "#10A37F" },
+  { "id": "gemini", "label": "Gemini", "tag": "gemini-cli",  "command": "gemini", "accent": "#4285F4" },
+  { "id": "custom", "label": "Shell",  "tag": "powershell",  "command": "",       "accent": "#A78BFA" }
+]

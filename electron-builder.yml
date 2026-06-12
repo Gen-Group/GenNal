@@ -1,0 +1,32 @@
+appId: com.gennal.app
+productName: GenNal
+copyright: Copyright © GenNal
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - out/**
+  - package.json
+
+asarUnpack:
+  - "**/node_modules/node-pty/**"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: GenNal-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: GenNal
+
+# After building, copy dist/GenNal-Setup-1.0.0.exe to
+# website/downloads/GenNal-Setup.exe to publish it on the site.
