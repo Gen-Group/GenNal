@@ -5,6 +5,18 @@ each in its own live terminal pane, with a shared code view and an AI assistant 
 
 ![status](https://img.shields.io/badge/status-built-7c5cff) ![platform](https://img.shields.io/badge/platform-Windows-4285f4)
 
+![GenNal cockpit](docs/screenshots/cockpit.png)
+
+## Screenshots
+
+| Code editor + live terminal | Multi-pane float layout |
+| --- | --- |
+| ![Editor and terminal](docs/screenshots/editor.png) | ![Float layout](docs/screenshots/float-layout.png) |
+
+Grid of model terminals running side by side:
+
+![Grid layout](docs/screenshots/grid.png)
+
 ## Download & Install (Windows)
 
 Grab the latest installer from the [**Releases**](https://github.com/Gen-Group/GenNal/releases/latest) page:
