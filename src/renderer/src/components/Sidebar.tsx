@@ -30,9 +30,13 @@ function isImageFile(file: WorkspaceFile): boolean {
 
 function fileKind(file: WorkspaceFile): string {
   const ext = fileExt(file)
-  if (['.ts', '.tsx', '.js', '.jsx'].includes(ext)) return 'js'
+  if (['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'].includes(ext)) return 'js'
+  if (['.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.hxx'].includes(ext)) return 'cpp'
+  if (ext === '.swift') return 'swift'
+  if (ext === '.cmake' || file.name === 'CMakeLists.txt') return 'cmake'
   if (ext === '.dart') return 'dart'
   if (['.css', '.scss'].includes(ext)) return 'css'
+  if (['.html'].includes(ext)) return 'html'
   if (['.json', '.yaml', '.yml'].includes(ext)) return 'data'
   if (['.md', '.txt'].includes(ext)) return 'doc'
   if (IMAGE_EXTS.includes(ext)) return 'img'

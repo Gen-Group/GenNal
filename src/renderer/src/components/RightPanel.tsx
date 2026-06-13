@@ -90,6 +90,8 @@ export default function RightPanel(): JSX.Element {
   const stopRun = useStore((s) => s.stopRun)
   const clearRunOutput = useStore((s) => s.clearRunOutput)
   const outputRef = useRef<HTMLDivElement>(null)
+  const autoSaveDirtyRef = useRef(false)
+  const autoSavePathRef = useRef<string | undefined>(undefined)
   const [sampleCode, setSampleCode] = useState(SAMPLE)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   const selectedFile = workspace?.selectedFile
@@ -104,6 +106,7 @@ export default function RightPanel(): JSX.Element {
   const handleCodeChange = (value: string): void => {
     setSaveState('idle')
     if (workspace) {
+      autoSaveDirtyRef.current = workspace.kind === 'project' && Boolean(selectedFile)
       updateWorkspaceContent(value)
     } else {
       setSampleCode(value)
@@ -113,8 +116,13 @@ export default function RightPanel(): JSX.Element {
   const handleSave = async (): Promise<void> => {
     if (!selectedFile) return
     setSaveState('saving')
-    await saveWorkspaceFile(code)
-    setSaveState('saved')
+    const saved = await saveWorkspaceFile(code)
+    if (saved) {
+      autoSaveDirtyRef.current = false
+      setSaveState('saved')
+    } else {
+      setSaveState('idle')
+    }
   }
 
   const handleScroll = (event: UIEvent<HTMLTextAreaElement>): void => {
@@ -161,6 +169,33 @@ export default function RightPanel(): JSX.Element {
     const el = outputRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [runOutput, codeTab])
+
+  useEffect(() => {
+    autoSaveDirtyRef.current = false
+    autoSavePathRef.current = selectedFile?.path
+    setSaveState('idle')
+  }, [selectedFile?.path])
+
+  useEffect(() => {
+    if (workspace?.kind !== 'project' || !selectedFile || !autoSaveDirtyRef.current) return
+
+    const filePath = selectedFile.path
+    const timeout = window.setTimeout(() => {
+      if (autoSavePathRef.current !== filePath) return
+      setSaveState('saving')
+      void saveWorkspaceFile(code).then((saved) => {
+        if (autoSavePathRef.current !== filePath) return
+        if (saved) {
+          autoSaveDirtyRef.current = false
+          setSaveState('saved')
+        } else {
+          setSaveState('idle')
+        }
+      })
+    }, 900)
+
+    return () => window.clearTimeout(timeout)
+  }, [code, saveWorkspaceFile, selectedFile, workspace?.kind])
 
   const moveToLeft = panelSide === 'right'
 
@@ -241,6 +276,11 @@ export default function RightPanel(): JSX.Element {
               <span className="file-path-label" title={fileLabel}>{fileLabel}</span>
               {workspace?.truncated && <span className="rp-warn">Preview truncated</span>}
               {workspaceError && <span className="rp-warn">{workspaceError}</span>}
+              {workspace?.kind === 'project' && selectedFile && (
+                <span className="rp-warn">
+                  {saveState === 'saving' ? 'Auto saving...' : 'Auto save on'}
+                </span>
+              )}
               <button disabled={!selectedFile || saveState === 'saving'} onClick={() => void handleSave()}>
                 {saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : 'Save'}
               </button>

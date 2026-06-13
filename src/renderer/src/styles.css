@@ -842,8 +842,12 @@ select {
   box-shadow: 0 0 10px -3px currentColor;
 }
 .kind-js { background: #f7df1e; color: #f7df1e; }
+.kind-cpp { background: #f472b6; color: #f472b6; }
+.kind-swift { background: #ff6b35; color: #ff6b35; }
 .kind-dart { background: #40c4ff; color: #40c4ff; }
 .kind-css { background: #60a5fa; color: #60a5fa; }
+.kind-html { background: #ef4444; color: #ef4444; }
+.kind-cmake { background: #ef4444; color: #ef4444; }
 .kind-data { background: #f97316; color: #f97316; }
 .kind-doc { background: #a78bfa; color: #a78bfa; }
 .kind-env { background: #22c55e; color: #22c55e; }

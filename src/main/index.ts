@@ -44,23 +44,33 @@ const SKIP_DIRS = new Set([
 ])
 const TEXT_EXTS = new Set([
   '.c',
+  '.cc',
+  '.cmake',
   '.cpp',
+  '.cxx',
   '.cs',
   '.css',
   '.dart',
   '.env',
   '.go',
   '.gradle',
+  '.h',
+  '.hh',
+  '.hpp',
+  '.hxx',
   '.html',
   '.java',
   '.js',
   '.json',
   '.jsx',
+  '.mjs',
+  '.cjs',
   '.md',
   '.php',
   '.py',
   '.rs',
   '.scss',
+  '.swift',
   '.ts',
   '.tsx',
   '.txt',
@@ -72,19 +82,29 @@ const TEXT_EXTS = new Set([
 
 const CODE_EXTS = new Set([
   '.c',
+  '.cc',
+  '.cmake',
   '.cpp',
+  '.cxx',
   '.cs',
   '.css',
   '.dart',
   '.go',
+  '.h',
+  '.hh',
+  '.hpp',
+  '.hxx',
   '.html',
   '.java',
   '.js',
   '.jsx',
+  '.mjs',
+  '.cjs',
   '.php',
   '.py',
   '.rs',
   '.scss',
+  '.swift',
   '.ts',
   '.tsx',
   '.vue'
@@ -104,18 +124,19 @@ const IMAGE_MIME = new Map<string, string>([
 const IMAGE_PREVIEW_LIMIT = 25 * 1024 * 1024 // 25 MB
 
 function toWorkspaceFile(path: string, root?: string, size = 0): WorkspaceFile {
-  const extension = extname(path).toLowerCase()
+  const name = basename(path)
+  const extension = name === 'CMakeLists.txt' ? '.cmake' : extname(path).toLowerCase()
   return {
     path,
-    name: basename(path),
-    relativePath: root ? relative(root, path) || basename(path) : basename(path),
+    name,
+    relativePath: root ? relative(root, path) || name : name,
     extension,
     size
   }
 }
 
 function canPreview(path: string): boolean {
-  return TEXT_EXTS.has(extname(path).toLowerCase())
+  return basename(path) === 'CMakeLists.txt' || TEXT_EXTS.has(extname(path).toLowerCase())
 }
 
 function githubBranchUrl(remoteUrl: string, branch: string): string | undefined {

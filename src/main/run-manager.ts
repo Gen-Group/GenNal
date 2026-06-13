@@ -1,9 +1,33 @@
 import { spawn, type ChildProcess } from 'child_process'
-import { dirname, extname } from 'path'
+import { basename, dirname, extname, join } from 'path'
 import type { BrowserWindow } from 'electron'
 import type { RunStartPayload } from '../shared/types'
 
 type Runner = (file: string) => { command: string; args: string[] }
+
+function psQuote(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`
+}
+
+function cRunner(compiler: string): Runner {
+  return (file) => {
+    const out = join(dirname(file), `${basename(file, extname(file))}.exe`)
+    const script = [
+      `$source = ${psQuote(file)}`,
+      `$out = ${psQuote(out)}`,
+      `$compiler = Get-Command ${psQuote(compiler)} -ErrorAction SilentlyContinue`,
+      'if (-not $compiler) { throw "' + compiler + ' is not installed or not on PATH." }',
+      '& $compiler.Source $source -o $out',
+      'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+      '& $out'
+    ].join('; ')
+
+    return {
+      command: 'powershell.exe',
+      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script]
+    }
+  }
+}
 
 // Map a source extension to the executable that runs it. Each interpreter must
 // be on PATH; a missing one surfaces as a friendly 'not found' line, not a crash.
@@ -11,10 +35,15 @@ const RUNNERS: Record<string, Runner> = {
   '.js': (f) => ({ command: 'node', args: [f] }),
   '.mjs': (f) => ({ command: 'node', args: [f] }),
   '.cjs': (f) => ({ command: 'node', args: [f] }),
+  '.c': cRunner('gcc'),
+  '.cc': cRunner('g++'),
+  '.cpp': cRunner('g++'),
+  '.cxx': cRunner('g++'),
   '.py': (f) => ({ command: 'python', args: [f] }),
   '.rb': (f) => ({ command: 'ruby', args: [f] }),
   '.go': (f) => ({ command: 'go', args: ['run', f] }),
   '.dart': (f) => ({ command: 'dart', args: ['run', f] }),
+  '.swift': (f) => ({ command: 'swift', args: [f] }),
   '.sh': (f) => ({ command: 'bash', args: [f] }),
   '.ps1': (f) => ({
     command: 'powershell.exe',

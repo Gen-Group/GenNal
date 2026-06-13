@@ -106,7 +106,7 @@ interface AppState {
   openImagePreview: (file: WorkspaceFile) => Promise<void>
   closeImagePreview: () => void
   updateWorkspaceContent: (content: string) => void
-  saveWorkspaceFile: (content: string) => Promise<void>
+  saveWorkspaceFile: (content: string) => Promise<boolean>
   runFile: () => Promise<void>
   stopRun: () => void
   appendRunOutput: (output: RunOutput) => void
@@ -469,7 +469,7 @@ export const useStore = create<AppState>((set, get) => ({
     set({ workspaceError: null })
     const workspace = get().workspace
     const selectedFile = workspace?.selectedFile
-    if (!workspace || !selectedFile) return
+    if (!workspace || !selectedFile) return false
 
     try {
       const result = await window.api.writeWorkspaceFile({ file: selectedFile, content })
@@ -482,8 +482,10 @@ export const useStore = create<AppState>((set, get) => ({
         },
         workspaceError: null
       })
+      return true
     } catch (err) {
       set({ workspaceError: err instanceof Error ? err.message : 'Unable to save file.' })
+      return false
     }
   },
 
@@ -501,8 +503,8 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     // Run what's on screen: flush the editor buffer to disk first.
-    await get().saveWorkspaceFile(workspace.content ?? '')
-    if (get().workspaceError) return
+    const saved = await get().saveWorkspaceFile(workspace.content ?? '')
+    if (!saved) return
 
     set({ runOutput: [], running: true })
     window.api.runStart({
