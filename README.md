@@ -1,9 +1,10 @@
 # GenNal — Multi-Model AI Cockpit
 
-A Windows desktop app to **launch, run, and manage Codex, Claude & Gemini simultaneously**,
+A desktop app to **launch, run, and manage Codex, Claude & Gemini simultaneously**,
 each in its own live terminal pane, with a shared code view and an AI assistant panel.
+Runs on **Windows** and **macOS**.
 
-![status](https://img.shields.io/badge/status-built-7c5cff) ![platform](https://img.shields.io/badge/platform-Windows-4285f4)
+![status](https://img.shields.io/badge/status-built-7c5cff) ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-4285f4)
 
 ![GenNal cockpit](docs/screenshots/cockpit.png)
 
@@ -17,16 +18,27 @@ Grid of model terminals running side by side:
 
 ![Grid layout](docs/screenshots/grid.png)
 
-## Download & Install (Windows)
+## Download & Install
 
-Grab the latest installer from the [**Releases**](https://github.com/Gen-Group/GenNal/releases/latest) page:
+Grab the latest installer from the [**Releases**](https://github.com/Gen-Group/GenNal/releases/latest) page.
 
-1. Download **`GenNal-Setup-1.0.1.exe`** from the latest release.
+### Windows
+
+1. Download **`GenNal-Setup-1.0.2.exe`** from the latest release.
 2. Run it and follow the prompts (you can choose the install location).
 3. Launch **GenNal** from the Start Menu or desktop shortcut.
 
 > The installer is currently unsigned, so Windows SmartScreen may warn you.
 > Click **More info → Run anyway** to continue.
+
+### macOS
+
+1. Download the `.dmg` matching your Mac:
+   - **`GenNal-1.0.2-arm64.dmg`** — Apple Silicon (M1/M2/M3/M4)
+   - **`GenNal-1.0.2-x64.dmg`** — Intel
+2. Open the `.dmg` and drag **GenNal** into **Applications**.
+3. The build is unsigned, so on first launch **right-click GenNal → Open → Open**
+   (or run `xattr -cr /Applications/GenNal.app` once to clear the Gatekeeper warning).
 
 ## Quick start (dev)
 
@@ -41,16 +53,24 @@ npm run dev            # launch the app with hot reload
 > an unusual arch should you run `npm run rebuild` (that path needs Visual Studio C++ build
 > tools: "Desktop development with C++").
 
-## Build the .exe
+## Build the installers
+
+**Windows** (run on Windows):
 
 ```powershell
-npm run dist:win       # → dist/GenNal-Setup-1.0.1.exe  (NSIS installer)
+npm run dist:win       # → dist/GenNal-Setup-1.0.2.exe  (NSIS installer)
 ```
 
 Then publish it on the website:
 
 ```powershell
-Copy-Item dist\GenNal-Setup-1.0.1.exe website\downloads\GenNal-Setup.exe
+Copy-Item dist\GenNal-Setup-1.0.2.exe website\downloads\GenNal-Setup.exe
+```
+
+**macOS** (must run on a Mac — native `node-pty` and `.dmg` packaging are macOS-only):
+
+```bash
+npm run dist:mac       # → dist/GenNal-1.0.2-arm64.dmg and dist/GenNal-1.0.2-x64.dmg
 ```
 
 ## What it does
