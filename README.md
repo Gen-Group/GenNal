@@ -33,12 +33,23 @@ Grab the latest installer from the [**Releases**](https://github.com/Gen-Group/G
 
 ### macOS
 
-1. Download the `.dmg` matching your Mac:
-   - **`GenNal-1.0.2-arm64.dmg`** — Apple Silicon (M1/M2/M3/M4)
-   - **`GenNal-1.0.2-x64.dmg`** — Intel
-2. Open the `.dmg` and drag **GenNal** into **Applications**.
-3. The build is unsigned, so on first launch **right-click GenNal → Open → Open**
-   (or run `xattr -cr /Applications/GenNal.app` once to clear the Gatekeeper warning).
+> ⚠️ A prebuilt macOS `.dmg` is **not** attached to the release. macOS apps can only be
+> packaged on a Mac (the native `node-pty` module and `.dmg`/`.app` bundling are
+> macOS-only and cannot be produced on Windows), so you build it locally on a Mac.
+
+On a Mac with [Node.js 20+](https://nodejs.org) and `git`:
+
+```bash
+git clone https://github.com/Gen-Group/GenNal.git
+cd GenNal
+bash mac/install.sh      # builds GenNal and installs GenNal.app into /Applications
+```
+
+This also produces `GenNal-1.0.2-arm64.dmg` (Apple Silicon) and `GenNal-1.0.2-x64.dmg`
+(Intel) in `dist/`. See [`mac/README.md`](mac/README.md) for the full guide.
+
+The build is unsigned, so on first launch **right-click GenNal → Open → Open**
+(or run `xattr -cr /Applications/GenNal.app` once). `mac/install.sh` clears this for you.
 
 ## Quick start (dev)
 
