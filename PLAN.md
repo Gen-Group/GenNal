@@ -43,7 +43,7 @@ Alternatives if you change your mind later: Tauri (smaller .exe, Rust), or direc
 | State      | Zustand                         | workspaces / sessions / layout store     |
 | Styling    | Tailwind CSS                    | Dark theme, accent dots, chips           |
 | Stats      | systeminformation               | CPU / Memory sparklines                  |
-| Packaging  | electron-builder (NSIS)         | Produces `GenNal Setup.exe`              |
+| Packaging  | electron-builder (NSIS)         | Produces `GanNal-Setup-1.0.0.exe`        |
 
 ---
 
@@ -206,16 +206,16 @@ GenNal/                          (electron-vite layout — as built)
 - **Done when:** keyboard-driven, broadcast works across panes.
 
 ### Phase 8 — Package to .exe ☐
-- `electron-builder.yml` → NSIS target, app icon, productName "GenNal".
-- `npm run build && npx electron-builder` → `dist/GenNal Setup.exe`.
+- `electron-builder.yml` → NSIS target, app icon, productName "GanNal".
+- `npm run build && npx electron-builder` → `dist/GanNal-Setup-1.0.0.exe`.
 - Optional: auto-update feed.
 - **Done when:** the `.exe` installs and runs on a clean machine.
 
 ### Phase 9 — Download website ☑ (scaffolded)
 - `website/index.html` + `website/styles.css` — dark landing page (hero, features,
   models, requirements, download band). No build step, plain HTML/CSS.
-- Download buttons point to `website/downloads/GenNal-Setup.exe`.
-- **To finish:** copy the Phase 8 installer into `website/downloads/GenNal-Setup.exe`
+- Download buttons point to `website/downloads/GanNal-Setup.exe`.
+- **To finish:** copy the Phase 8 installer into `website/downloads/GanNal-Setup.exe`
   (or host on GitHub Releases and update the button `href`), then deploy `website/`
   to GitHub Pages / Netlify / Vercel / Cloudflare Pages. See `website/README.md`.
 - **Done when:** visitors can download a working `.exe` from the live URL.

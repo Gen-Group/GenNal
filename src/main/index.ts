@@ -10,8 +10,10 @@ import {
   killAll
 } from './pty-manager'
 import { startStats, stopStats } from './stats-service'
+import { startRun, stopRun } from './run-manager'
 import type {
   PtyCreatePayload,
+  RunStartPayload,
   WorkspaceFile,
   WorkspaceKind,
   WorkspaceOpenResult,
@@ -22,14 +24,31 @@ import type {
 let mainWindow: BrowserWindow | null = null
 
 const PREVIEW_LIMIT = 180_000
-const MAX_PROJECT_FILES = 120
-const SKIP_DIRS = new Set(['.git', 'node_modules', 'out', 'dist', 'build', '.next', '.vite'])
+const MAX_PROJECT_FILES = 400
+const SKIP_DIRS = new Set([
+  '.dart_tool',
+  '.git',
+  '.idea',
+  '.next',
+  '.vite',
+  '.vscode',
+  'android',
+  'build',
+  'coverage',
+  'dist',
+  'ios',
+  'node_modules',
+  'out'
+])
 const TEXT_EXTS = new Set([
   '.c',
   '.cpp',
   '.cs',
   '.css',
+  '.dart',
+  '.env',
   '.go',
+  '.gradle',
   '.html',
   '.java',
   '.js',
@@ -49,6 +68,26 @@ const TEXT_EXTS = new Set([
   '.yml'
 ])
 
+const CODE_EXTS = new Set([
+  '.c',
+  '.cpp',
+  '.cs',
+  '.css',
+  '.dart',
+  '.go',
+  '.html',
+  '.java',
+  '.js',
+  '.jsx',
+  '.php',
+  '.py',
+  '.rs',
+  '.scss',
+  '.ts',
+  '.tsx',
+  '.vue'
+])
+
 function toWorkspaceFile(path: string, root?: string, size = 0): WorkspaceFile {
   const extension = extname(path).toLowerCase()
   return {
@@ -62,6 +101,42 @@ function toWorkspaceFile(path: string, root?: string, size = 0): WorkspaceFile {
 
 function canPreview(path: string): boolean {
   return TEXT_EXTS.has(extname(path).toLowerCase())
+}
+
+function githubBranchUrl(remoteUrl: string, branch: string): string | undefined {
+  const normalized = remoteUrl
+    .trim()
+    .replace(/^git@github\.com:/, 'https://github.com/')
+    .replace(/^ssh:\/\/git@github\.com\//, 'https://github.com/')
+    .replace(/\.git$/, '')
+
+  return normalized.startsWith('https://github.com/') ? `${normalized}/tree/${encodeURIComponent(branch)}` : undefined
+}
+
+async function readGitInfo(root: string): Promise<WorkspaceOpenResult['git'] | undefined> {
+  try {
+    const gitDir = join(root, '.git')
+    const head = await fs.readFile(join(gitDir, 'HEAD'), 'utf8')
+    const branch = head.startsWith('ref: refs/heads/') ? head.trim().replace('ref: refs/heads/', '') : head.trim().slice(0, 7)
+    if (!branch) return undefined
+
+    let remoteUrl: string | undefined
+    try {
+      const config = await fs.readFile(join(gitDir, 'config'), 'utf8')
+      const originMatch = config.match(/\[remote "origin"\][\s\S]*?\n\s*url\s*=\s*(.+)/)
+      remoteUrl = originMatch?.[1]?.trim()
+    } catch {
+      /* no remote */
+    }
+
+    return {
+      branch,
+      remoteUrl,
+      branchUrl: remoteUrl ? githubBranchUrl(remoteUrl, branch) : undefined
+    }
+  } catch {
+    return undefined
+  }
 }
 
 async function readPreview(file: WorkspaceFile): Promise<WorkspaceReadResult> {
@@ -104,7 +179,11 @@ async function listProjectFiles(root: string): Promise<WorkspaceFile[]> {
   }
 
   await walk(root)
-  return files
+  return files.sort((a, b) => {
+    const aCode = CODE_EXTS.has(a.extension) ? 0 : 1
+    const bCode = CODE_EXTS.has(b.extension) ? 0 : 1
+    return aCode - bCode || a.relativePath.localeCompare(b.relativePath)
+  })
 }
 
 function createWindow(): void {
@@ -115,6 +194,7 @@ function createWindow(): void {
     minHeight: 680,
     show: false,
     frame: false,
+    icon: join(__dirname, '../../build/icon.ico'),
     backgroundColor: '#0a0b10',
     titleBarStyle: 'hidden',
     webPreferences: {
@@ -181,6 +261,7 @@ function registerIpc(): void {
     }
 
     const files = await listProjectFiles(pickedPath)
+    const git = await readGitInfo(pickedPath)
     const selectedFile = files.find((file) => canPreview(file.path)) ?? files[0]
     const preview = selectedFile ? await readPreview(selectedFile) : undefined
     return {
@@ -188,6 +269,7 @@ function registerIpc(): void {
       path: pickedPath,
       name: basename(pickedPath),
       files,
+      git,
       selectedFile,
       content: preview?.content,
       truncated: preview?.truncated
@@ -216,6 +298,11 @@ function registerIpc(): void {
   )
   ipcMain.on('pty:kill', (_e, { id }: { id: string }) => killSession(id))
 
+  ipcMain.on('run:start', (_e, payload: RunStartPayload) => {
+    if (mainWindow) startRun(mainWindow, payload)
+  })
+  ipcMain.on('run:stop', () => stopRun())
+
   ipcMain.on('win:minimize', () => mainWindow?.minimize())
   ipcMain.on('win:maximize', () => {
     if (!mainWindow) return
@@ -235,11 +322,13 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   killAll()
+  stopRun()
   stopStats()
   if (process.platform !== 'darwin') app.quit()
 })
 
 app.on('before-quit', () => {
   killAll()
+  stopRun()
   stopStats()
 })

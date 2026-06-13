@@ -1,4 +1,111 @@
+import { useEffect, useState, type CSSProperties } from 'react'
 import { useStore } from '../store'
+import type { WorkspaceFile } from '../../../shared/types'
+
+interface FileTreeNode {
+  name: string
+  path: string
+  folders: FileTreeNode[]
+  files: WorkspaceFile[]
+  fileCount: number
+}
+
+interface MutableFileTreeNode {
+  name: string
+  path: string
+  folders: Map<string, MutableFileTreeNode>
+  files: WorkspaceFile[]
+  fileCount: number
+}
+
+function fileKind(file: WorkspaceFile): string {
+  const ext = file.extension || file.name.match(/^\.[^.]+$/)?.[0] || ''
+  if (['.ts', '.tsx', '.js', '.jsx'].includes(ext)) return 'js'
+  if (ext === '.dart') return 'dart'
+  if (['.css', '.scss'].includes(ext)) return 'css'
+  if (['.json', '.yaml', '.yml'].includes(ext)) return 'data'
+  if (['.md', '.txt'].includes(ext)) return 'doc'
+  if (['.env'].includes(ext) || file.name.startsWith('.env')) return 'env'
+  return 'code'
+}
+
+function FileGlyph({ file }: { file: WorkspaceFile }): JSX.Element {
+  return <span className={`file-glyph kind-${fileKind(file)}`} aria-hidden="true" />
+}
+
+function fileDisplayPath(file: WorkspaceFile): { name: string; folder: string } {
+  const parts = file.relativePath.split(/[\\/]/).filter(Boolean)
+  const name = parts.pop() ?? file.name
+  return {
+    name,
+    folder: parts.length > 0 ? parts.join('/') : ''
+  }
+}
+
+function fileName(file: WorkspaceFile): string {
+  return fileDisplayPath(file).name
+}
+
+function toFileTree(node: MutableFileTreeNode): FileTreeNode {
+  return {
+    name: node.name,
+    path: node.path,
+    files: node.files,
+    fileCount: node.fileCount,
+    folders: Array.from(node.folders.values())
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(toFileTree)
+  }
+}
+
+function buildFileTree(files: WorkspaceFile[]): FileTreeNode {
+  const root: MutableFileTreeNode = { name: 'Root', path: 'Root', folders: new Map(), files: [], fileCount: 0 }
+
+  for (const file of files) {
+    const parts = file.relativePath.split(/[\\/]/).filter(Boolean)
+    parts.pop()
+
+    root.fileCount += 1
+    let cursor = root
+    let currentPath = ''
+
+    for (const part of parts) {
+      currentPath = currentPath ? `${currentPath}/${part}` : part
+      const existing = cursor.folders.get(part)
+      const next =
+        existing ?? { name: part, path: currentPath, folders: new Map(), files: [], fileCount: 0 }
+      next.fileCount += 1
+      cursor.folders.set(part, next)
+      cursor = next
+    }
+
+    cursor.files.push(file)
+  }
+
+  return toFileTree(root)
+}
+
+function findFolder(node: FileTreeNode, path: string): FileTreeNode | undefined {
+  if (node.path === path) return node
+  for (const folder of node.folders) {
+    const found = findFolder(folder, path)
+    if (found) return found
+  }
+  return undefined
+}
+
+function firstFileInFolder(folder: FileTreeNode): WorkspaceFile | undefined {
+  if (folder.files[0]) return folder.files[0]
+  for (const child of folder.folders) {
+    const found = firstFileInFolder(child)
+    if (found) return found
+  }
+  return undefined
+}
+
+function workspaceInitial(name: string): string {
+  return name.trim().charAt(0).toUpperCase() || 'W'
+}
 
 function Spark({ color }: { color: string }): JSX.Element {
   // Decorative sparkline matching the screenshot's System Overview.
@@ -11,9 +118,13 @@ function Spark({ color }: { color: string }): JSX.Element {
 }
 
 export default function Sidebar(): JSX.Element {
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set())
+  const [folderMenu, setFolderMenu] = useState<{ folder: string; x: number; y: number } | null>(null)
   const sessions = useStore((s) => s.sessions)
   const activeId = useStore((s) => s.activeId)
   const setActive = useStore((s) => s.setActive)
+  const models = useStore((s) => s.models)
+  const addSession = useStore((s) => s.addSession)
   const stats = useStore((s) => s.stats)
   const togglePalette = useStore((s) => s.togglePalette)
   const workspace = useStore((s) => s.workspace)
@@ -21,57 +132,216 @@ export default function Sidebar(): JSX.Element {
   const openWorkspace = useStore((s) => s.openWorkspace)
   const openWorkspaceFile = useStore((s) => s.openWorkspaceFile)
   const running = sessions.filter((s) => s.status === 'running').length
+  const fileTree = workspace ? buildFileTree(workspace.files.slice(0, 120)) : undefined
+  const menuFolder = folderMenu && fileTree ? findFolder(fileTree, folderMenu.folder) : undefined
+  const workspaceName = workspace?.name ?? 'Open workspace'
+  const primarySessions = sessions.slice(0, 3)
+  const aiModel = models.find((model) => model.id === 'codex') ?? models.find((model) => model.id !== 'custom')
+  const cliModel = models.find((model) => model.id === 'custom') ?? models[0]
+  const branchName = workspace?.git?.branch ?? 'main'
+  const branchUrl = workspace?.git?.branchUrl
+
+  useEffect(() => {
+    if (!folderMenu) return
+    const close = (): void => setFolderMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('keydown', close)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('keydown', close)
+    }
+  }, [folderMenu])
+
+  const toggleFolder = (folder: string): void => {
+    setCollapsedFolders((current) => {
+      const next = new Set(current)
+      if (next.has(folder)) next.delete(folder)
+      else next.add(folder)
+      return next
+    })
+  }
+
+  const openFolderMenu = (folder: string, x: number, y: number): void => {
+    setFolderMenu({ folder, x, y })
+  }
+
+  const openBranch = (): void => {
+    if (branchUrl) {
+      window.open(branchUrl, '_blank', 'noopener,noreferrer')
+    } else {
+      void openWorkspace('project')
+    }
+  }
+
+  const renderFile = (file: WorkspaceFile): JSX.Element => (
+    <button
+      key={file.path}
+      className={`file-item ${workspace?.selectedFile?.path === file.path ? 'active' : ''}`}
+      title={`${file.relativePath} - right-click to preview`}
+      onClick={() => void openWorkspaceFile(file)}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        void openWorkspaceFile(file)
+      }}
+    >
+      <FileGlyph file={file} />
+      <span className="file-copy">
+        <span className="file-name">{fileName(file)}</span>
+      </span>
+    </button>
+  )
+
+  const renderFolder = (folder: FileTreeNode, depth = 0): JSX.Element => (
+    <div className="file-group" key={folder.path} style={{ '--tree-depth': depth } as CSSProperties}>
+      <div
+        className="file-group-row"
+        onContextMenu={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          openFolderMenu(folder.path, event.clientX, event.clientY)
+        }}
+      >
+        <button className="file-group-head" title={folder.path} onClick={() => toggleFolder(folder.path)}>
+          <span className={`folder-chevron ${collapsedFolders.has(folder.path) ? 'collapsed' : ''}`} />
+          <span className="folder-glyph" />
+          <span>{folder.name}</span>
+          <span className="file-count">{folder.fileCount}</span>
+        </button>
+        <button
+          className="folder-more"
+          title="Folder actions"
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            const rect = event.currentTarget.getBoundingClientRect()
+            openFolderMenu(folder.path, rect.right - 156, rect.bottom + 4)
+          }}
+        >
+          <span className="more-icon" />
+        </button>
+      </div>
+      {!collapsedFolders.has(folder.path) && (
+        <div className="file-children">
+          {folder.files.map(renderFile)}
+          {folder.folders.map((child) => renderFolder(child, depth + 1))}
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <aside className="sidebar">
       <section className="side-sec">
-        <div className="side-head">
-          <span>WORKSPACES</span>
-          <button className="mini" onClick={() => void openWorkspace('project')}>+ Project</button>
+        <div className="workspace-top">
+          <span>Workspaces</span>
+          <div className="workspace-tools">
+            <button className="workspace-tool" title="Workspace filters">
+              <span className="sliders-icon" />
+            </button>
+            <button className="workspace-tool" title="Upload file" onClick={() => void openWorkspace('file')}>
+              <span className="file-plus-icon" />
+            </button>
+            <button className="workspace-tool" title="Open project" onClick={() => void openWorkspace('project')}>
+              +
+            </button>
+          </div>
         </div>
-        <button className="ws-item active" onClick={() => void openWorkspace('project')}>
-          <span className="ws-dot" style={{ background: '#f5a623' }} />
-          <span className="ws-name">{workspace?.name ?? 'Open a project'}</span>
-          <span className="badge">{workspace?.files.length ?? sessions.length}</span>
-        </button>
-        <button className="qa" onClick={() => void openWorkspace('file')}>Upload File</button>
-        <button className="qa" onClick={() => void openWorkspace('project')}>Upload Project</button>
+        <div className="workspace-filter">
+          <span className="list-icon" />
+          <span>All</span>
+          <span className="workspace-filter-count">{workspace ? 1 : 0}</span>
+        </div>
+        <div className={`workspace-stack ${workspace ? 'active' : ''}`}>
+          <button
+            className={`workspace-branch ${branchUrl ? 'linked' : ''}`}
+            title={branchUrl ?? `Current branch: ${branchName}`}
+            onClick={openBranch}
+          >
+            <span className="branch-dot" />
+            <span className="branch-name">{branchName}</span>
+            <span className="branch-pill">primary</span>
+          </button>
+          <button className="workspace-project" onClick={() => void openWorkspace('project')}>
+            <span className="project-indent" />
+            <span className="project-icon">{workspaceInitial(workspaceName)}</span>
+            <span className="project-name">{workspaceName}</span>
+            <span className="project-meta">{workspace ? branchName : 'project'}</span>
+          </button>
+          <div className="workspace-models">
+            {aiModel && (
+              <button
+                className="workspace-action-chip ai"
+                title={`Start ${aiModel.label}`}
+                onClick={() => addSession(aiModel.id)}
+              >
+                AI
+              </button>
+            )}
+            {cliModel && (
+              <button
+                className="workspace-action-chip cli"
+                title={`Start ${cliModel.label}`}
+                onClick={() => addSession(cliModel.id)}
+              >
+                CLI
+              </button>
+            )}
+            {primarySessions.map((session) => (
+              <button
+                key={session.id}
+                className={`workspace-model ${activeId === session.id ? 'active' : ''}`}
+                title={session.label}
+                onClick={() => setActive(session.id)}
+              >
+                <span className="model-status" style={{ background: session.accent }} />
+                <span>{session.label.slice(0, 1)}</span>
+              </button>
+            ))}
+            {primarySessions.length === 0 && (
+              <span className="workspace-model-empty">No sessions</span>
+            )}
+            <span className="workspace-open-arrow">›</span>
+          </div>
+        </div>
+        <div className="workspace-actions">
+          <button className="workspace-action" onClick={() => void openWorkspace('file')}>Upload File</button>
+          <button className="workspace-action" onClick={() => void openWorkspace('project')}>Upload Project</button>
+        </div>
         {workspaceError && <div className="side-error">{workspaceError}</div>}
         {workspace && (
           <div className="file-list">
-            {workspace.files.slice(0, 24).map((file) => (
-              <button
-                key={file.path}
-                className={`file-item ${workspace.selectedFile?.path === file.path ? 'active' : ''}`}
-                title={file.relativePath}
-                onClick={() => void openWorkspaceFile(file)}
-              >
-                {file.relativePath}
-              </button>
-            ))}
+            {fileTree?.files.map(renderFile)}
+            {fileTree?.folders.map((folder) => renderFolder(folder))}
+            {workspace.files.length > 120 && (
+              <div className="file-more">+{workspace.files.length - 120} more files</div>
+            )}
           </div>
         )}
-      </section>
-
-      <section className="side-sec">
-        <div className="side-head">
-          <span>MODEL SESSIONS</span>
-        </div>
-        {sessions.length === 0 && <div className="side-empty">No models running yet.</div>}
-        {sessions.map((s) => (
-          <button
-            key={s.id}
-            className={`sess-item ${activeId === s.id ? 'active' : ''}`}
-            onClick={() => setActive(s.id)}
+        {folderMenu && menuFolder && (
+          <div
+            className="folder-menu"
+            style={{ left: folderMenu.x, top: folderMenu.y }}
+            onClick={(event) => event.stopPropagation()}
           >
-            <span
-              className={`sess-dot ${s.status}`}
-              style={{ background: s.status === 'running' ? s.accent : undefined }}
-            />
-            <span className="sess-name">{s.label}</span>
-            <span className="sess-state">{s.status}</span>
-          </button>
-        ))}
+            <button
+              onClick={() => {
+                const firstFile = firstFileInFolder(menuFolder)
+                if (firstFile) void openWorkspaceFile(firstFile)
+                setFolderMenu(null)
+              }}
+            >
+              Preview first file
+            </button>
+            <button
+              onClick={() => {
+                toggleFolder(menuFolder.path)
+                setFolderMenu(null)
+              }}
+            >
+              {collapsedFolders.has(menuFolder.path) ? 'Expand folder' : 'Collapse folder'}
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="side-sec">

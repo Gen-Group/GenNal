@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type {
   ModelDef,
+  RunExit,
+  RunOutput,
   SessionStatus,
   SystemStats,
   WorkspaceFile,
@@ -20,6 +22,7 @@ export interface Session {
 }
 
 export type LayoutMode = 'grid' | 'tabs' | 'stack' | 'float'
+export type PanelSide = 'left' | 'right'
 
 interface AppState {
   models: ModelDef[]
@@ -28,10 +31,14 @@ interface AppState {
   rows: number
   cols: number
   mode: LayoutMode
+  panelSide: PanelSide
   stats: SystemStats
   paletteOpen: boolean
+  settingsOpen: boolean
   workspace: WorkspaceOpenResult | null
   workspaceError: string | null
+  runOutput: RunOutput[]
+  running: boolean
 
   setModels: (m: ModelDef[]) => void
   addSession: (modelId: string) => void
@@ -40,16 +47,46 @@ interface AppState {
   setActive: (id: string) => void
   setGrid: (rows: number, cols: number) => void
   setMode: (mode: LayoutMode) => void
+  setPanelSide: (side: PanelSide) => void
   setStats: (s: SystemStats) => void
   togglePalette: (v?: boolean) => void
+  toggleSettings: (v?: boolean) => void
   openWorkspace: (kind: WorkspaceKind) => Promise<void>
   openWorkspaceFile: (file: WorkspaceFile) => Promise<void>
   updateWorkspaceContent: (content: string) => void
   saveWorkspaceFile: (content: string) => Promise<void>
+  runFile: () => Promise<void>
+  stopRun: () => void
+  appendRunOutput: (output: RunOutput) => void
+  finishRun: (exit: RunExit) => void
+  clearRunOutput: () => void
 }
 
 function uid(): string {
   return 'sess_' + Math.random().toString(36).slice(2, 10)
+}
+
+function initialPanelSide(): PanelSide {
+  try {
+    return window.localStorage.getItem('gennal.panelSide') === 'left' ? 'left' : 'right'
+  } catch {
+    return 'right'
+  }
+}
+
+const TERMINAL_ACCENTS = ['#22c55e', '#2f8cff', '#7c3aed', '#f97316']
+
+function createSession(model: ModelDef, index: number, cwd?: string): Session {
+  return {
+    id: uid(),
+    modelId: model.id,
+    label: model.label,
+    tag: model.tag,
+    accent: TERMINAL_ACCENTS[index % TERMINAL_ACCENTS.length] ?? model.accent,
+    command: model.command,
+    status: 'idle',
+    cwd
+  }
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -59,26 +96,34 @@ export const useStore = create<AppState>((set, get) => ({
   rows: 2,
   cols: 2,
   mode: 'grid',
+  panelSide: initialPanelSide(),
   stats: { cpu: 0, memUsedMB: 0, memTotalMB: 0 },
   paletteOpen: false,
+  settingsOpen: false,
   workspace: null,
   workspaceError: null,
+  runOutput: [],
+  running: false,
 
-  setModels: (models) => set({ models }),
+  setModels: (models) =>
+    set((s) => {
+      if (s.sessions.length > 0) return { models }
+
+      const shellModel = models.find((m) => m.id === 'custom') ?? models[0]
+      if (!shellModel) return { models }
+
+      const sessions = Array.from({ length: 4 }, (_, index) => createSession(shellModel, index, s.workspace?.path))
+      return { models, sessions, activeId: sessions[0]?.id ?? null, rows: 2, cols: 2, mode: 'grid' }
+    }),
 
   addSession: (modelId) => {
     const model = get().models.find((m) => m.id === modelId)
     if (!model) return
-    const session: Session = {
-      id: uid(),
-      modelId: model.id,
-      label: model.label,
-      tag: model.tag,
-      accent: model.accent,
-      command: model.command,
-      status: 'idle',
-      cwd: get().workspace?.kind === 'project' ? get().workspace?.path : undefined
-    }
+    const session = createSession(
+      model,
+      get().sessions.length,
+      get().workspace?.kind === 'project' ? get().workspace?.path : undefined
+    )
     set((s) => ({ sessions: [...s.sessions, session], activeId: session.id }))
   },
 
@@ -95,8 +140,17 @@ export const useStore = create<AppState>((set, get) => ({
   setActive: (id) => set({ activeId: id }),
   setGrid: (rows, cols) => set({ rows, cols }),
   setMode: (mode) => set({ mode }),
+  setPanelSide: (panelSide) => {
+    try {
+      window.localStorage.setItem('gennal.panelSide', panelSide)
+    } catch {
+      /* ignore storage errors */
+    }
+    set({ panelSide })
+  },
   setStats: (stats) => set({ stats }),
   togglePalette: (v) => set((s) => ({ paletteOpen: v ?? !s.paletteOpen })),
+  toggleSettings: (v) => set((s) => ({ settingsOpen: v ?? !s.settingsOpen })),
 
   openWorkspace: async (kind) => {
     set({ workspaceError: null })
@@ -152,5 +206,48 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (err) {
       set({ workspaceError: err instanceof Error ? err.message : 'Unable to save file.' })
     }
-  }
+  },
+
+  runFile: async () => {
+    const { workspace, running } = get()
+    if (running) return
+
+    const selectedFile = workspace?.selectedFile
+    if (!workspace || !selectedFile) {
+      set({
+        runOutput: [{ stream: 'system', chunk: 'Open a file with "Upload File" to run it.\n' }],
+        running: false
+      })
+      return
+    }
+
+    // Run what's on screen: flush the editor buffer to disk first.
+    await get().saveWorkspaceFile(workspace.content ?? '')
+    if (get().workspaceError) return
+
+    set({ runOutput: [], running: true })
+    window.api.runStart({
+      filePath: selectedFile.path,
+      cwd: workspace.kind === 'project' ? workspace.path : undefined
+    })
+  },
+
+  stopRun: () => window.api.runStop(),
+
+  appendRunOutput: (output) => set((s) => ({ runOutput: [...s.runOutput, output] })),
+
+  finishRun: (exit) =>
+    set((s) => {
+      const detail = exit.signal ? ` (${exit.signal})` : ''
+      const label = exit.code === null ? '—' : String(exit.code)
+      return {
+        running: false,
+        runOutput: [
+          ...s.runOutput,
+          { stream: 'system', chunk: `\nProcess exited with code ${label}${detail}\n` }
+        ]
+      }
+    }),
+
+  clearRunOutput: () => set({ runOutput: [] })
 }))

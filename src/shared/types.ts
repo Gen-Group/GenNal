@@ -45,6 +45,11 @@ export interface WorkspaceOpenResult {
   path: string
   name: string
   files: WorkspaceFile[]
+  git?: {
+    branch: string
+    remoteUrl?: string
+    branchUrl?: string
+  }
   selectedFile?: WorkspaceFile
   content?: string
   truncated?: boolean
@@ -59,4 +64,21 @@ export interface WorkspaceReadResult {
 export interface WorkspaceWritePayload {
   file: WorkspaceFile
   content: string
+}
+
+export type RunStream = 'stdout' | 'stderr' | 'system'
+
+export interface RunStartPayload {
+  filePath: string
+  cwd?: string
+}
+
+export interface RunOutput {
+  stream: RunStream
+  chunk: string
+}
+
+export interface RunExit {
+  code: number | null
+  signal?: string
 }

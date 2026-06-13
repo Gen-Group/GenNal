@@ -1,5 +1,6 @@
 appId: com.gennal.app
 productName: GenNal
+executableName: GenNal
 copyright: Copyright © GenNal
 
 directories:
@@ -14,6 +15,7 @@ asarUnpack:
   - "**/node_modules/node-pty/**"
 
 win:
+  icon: build/icon.ico
   target:
     - target: nsis
       arch:

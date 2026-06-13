@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useStore, type Session } from '../store'
@@ -52,11 +52,14 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
   const paneRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
-  const [manualInput, setManualInput] = useState('')
   const setStatus = useStore((s) => s.setStatus)
   const removeSession = useStore((s) => s.removeSession)
   const setActive = useStore((s) => s.setActive)
   const activeId = useStore((s) => s.activeId)
+  const sessions = useStore((s) => s.sessions)
+  const addSession = useStore((s) => s.addSession)
+  const setGrid = useStore((s) => s.setGrid)
+  const terminalNumber = sessions.findIndex((s) => s.id === session.id) + 1
 
   useEffect(() => {
     if (!termRef.current) return
@@ -141,48 +144,42 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
     window.api.ptyInput(session.id, data)
   }
 
-  const sendManualInput = (): void => {
-    const value = manualInput
-    if (!value) return
-    window.api.ptyInput(session.id, `${value}\r`)
-    setManualInput('')
-    requestAnimationFrame(() => terminalRef.current?.focus())
+  const actionClick = (e: MouseEvent<HTMLButtonElement>, action: () => void): void => {
+    e.stopPropagation()
+    action()
   }
 
   return (
     <div
       ref={paneRef}
       className={`pane ${activeId === session.id ? 'focused' : ''}`}
-      style={{ borderColor: `${session.accent}55` }}
+      style={{ borderColor: `${session.accent}88`, '--pane-accent': session.accent } as CSSProperties}
       onMouseDown={focusPane}
       onClick={focusPane}
       onKeyDown={onPaneKeyDown}
       tabIndex={0}
     >
       <div className="pane-head">
-        <span className="pane-dot" style={{ background: session.accent }} />
-        <span className="pane-name">{session.label}</span>
+        <span className="pane-dot" style={{ background: session.accent, color: session.accent }} />
+        <span className="pane-name">Terminal {terminalNumber || 1}</span>
         <span className="pane-tag">{session.tag}</span>
         <span className="pane-actions">
-          <button title="Restart" onClick={() => window.api.ptyInput(session.id, '\r')}>R</button>
-          <button title="Close" onClick={() => removeSession(session.id)}>x</button>
+          <button title="New terminal" onClick={(e) => actionClick(e, () => addSession(session.modelId))}>+</button>
+          <button title="Split columns" onClick={(e) => actionClick(e, () => setGrid(1, 2))}>
+            <span className="split-icon split-vertical" />
+          </button>
+          <button title="Split grid" onClick={(e) => actionClick(e, () => setGrid(2, 2))}>
+            <span className="split-icon split-grid" />
+          </button>
+          <button title="Close terminal" onClick={(e) => actionClick(e, () => removeSession(session.id))}>
+            <span className="trash-icon" />
+          </button>
+          <button title="More options" onClick={(e) => actionClick(e, () => window.api.ptyInput(session.id, '\r'))}>
+            <span className="more-icon" />
+          </button>
         </span>
       </div>
       <div className="pane-term" ref={termRef} onMouseDown={focusPane} />
-      <div className="pane-input" onMouseDown={(e) => e.stopPropagation()}>
-        <input
-          value={manualInput}
-          onChange={(e) => setManualInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              sendManualInput()
-            }
-          }}
-          placeholder="Type command or prompt, then press Enter"
-        />
-        <button onClick={sendManualInput}>Send</button>
-      </div>
     </div>
   )
 }

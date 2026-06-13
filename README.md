@@ -21,13 +21,13 @@ npm run dev            # launch the app with hot reload
 ## Build the .exe
 
 ```powershell
-npm run dist:win       # → dist/GenNal-Setup-1.0.0.exe  (NSIS installer)
+npm run dist:win       # → dist/GanNal-Setup-1.0.0.exe  (NSIS installer)
 ```
 
 Then publish it on the website:
 
 ```powershell
-Copy-Item dist\GenNal-Setup-1.0.0.exe website\downloads\GenNal-Setup.exe
+Copy-Item dist\GanNal-Setup-1.0.0.exe website\downloads\GanNal-Setup.exe
 ```
 
 ## What it does

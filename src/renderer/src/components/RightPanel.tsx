@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type UIEvent } from 'react'
 import { useStore } from '../store'
 
 const CODE_TABS = ['CODE', 'OUTPUT', 'TERMINAL', 'PROBLEMS']
@@ -21,13 +21,63 @@ class MyApp extends StatelessWidget {
   }
 }`
 
+const TOKEN_RE =
+  /("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\/\/.*|\b(?:abstract|as|async|await|break|case|catch|class|const|continue|default|do|else|enum|extends|false|final|for|if|import|in|is|new|null|return|static|super|switch|this|throw|true|try|var|void|while|with|yield)\b|\b[A-Z][A-Za-z0-9_]*\b|\b\d+(?:\.\d+)?\b|@\w+|[{}()[\].,;:])/g
+
+function tokenClass(token: string): string {
+  if (token.startsWith('//')) return 'tok-comment'
+  if (token.startsWith("'") || token.startsWith('"')) return 'tok-string'
+  if (/^@\w+$/.test(token)) return 'tok-meta'
+  if (/^\d/.test(token)) return 'tok-number'
+  if (/^[A-Z]/.test(token)) return 'tok-type'
+  if (/^[{}()[\].,;:]$/.test(token)) return 'tok-punctuation'
+  return 'tok-keyword'
+}
+
+function highlightLine(line: string): JSX.Element[] {
+  const tokens: JSX.Element[] = []
+  let lastIndex = 0
+
+  for (const match of line.matchAll(TOKEN_RE)) {
+    const token = match[0]
+    const index = match.index ?? 0
+
+    if (index > lastIndex) {
+      tokens.push(<span key={`${index}-plain`}>{line.slice(lastIndex, index)}</span>)
+    }
+
+    tokens.push(
+      <span key={`${index}-${token}`} className={tokenClass(token)}>
+        {token}
+      </span>
+    )
+    lastIndex = index + token.length
+  }
+
+  if (lastIndex < line.length) {
+    tokens.push(<span key="tail">{line.slice(lastIndex)}</span>)
+  }
+
+  return tokens
+}
+
 export default function RightPanel(): JSX.Element {
   const [codeTab, setCodeTab] = useState('CODE')
+  const [scroll, setScroll] = useState({ left: 0, top: 0 })
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const workspace = useStore((s) => s.workspace)
   const workspaceError = useStore((s) => s.workspaceError)
+  const panelSide = useStore((s) => s.panelSide)
+  const setPanelSide = useStore((s) => s.setPanelSide)
   const openWorkspace = useStore((s) => s.openWorkspace)
   const updateWorkspaceContent = useStore((s) => s.updateWorkspaceContent)
   const saveWorkspaceFile = useStore((s) => s.saveWorkspaceFile)
+  const runOutput = useStore((s) => s.runOutput)
+  const running = useStore((s) => s.running)
+  const runFile = useStore((s) => s.runFile)
+  const stopRun = useStore((s) => s.stopRun)
+  const clearRunOutput = useStore((s) => s.clearRunOutput)
+  const outputRef = useRef<HTMLDivElement>(null)
   const [sampleCode, setSampleCode] = useState(SAMPLE)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   const selectedFile = workspace?.selectedFile
@@ -37,6 +87,7 @@ export default function RightPanel(): JSX.Element {
     () => Array.from({ length: Math.max(code.split('\n').length, 1) }, (_, i) => i + 1),
     [code]
   )
+  const highlightedLines = useMemo(() => code.split('\n').map(highlightLine), [code])
 
   const handleCodeChange = (value: string): void => {
     setSaveState('idle')
@@ -54,39 +105,152 @@ export default function RightPanel(): JSX.Element {
     setSaveState('saved')
   }
 
+  const handleScroll = (event: UIEvent<HTMLTextAreaElement>): void => {
+    const target = event.currentTarget
+    setScroll({ left: target.scrollLeft, top: target.scrollTop })
+  }
+
+  const handleRun = (): void => {
+    if (running) {
+      stopRun()
+      return
+    }
+    setCodeTab('OUTPUT')
+    void runFile()
+  }
+
+  // Keep the console pinned to the newest output.
+  useEffect(() => {
+    if (codeTab !== 'OUTPUT') return
+    const el = outputRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [runOutput, codeTab])
+
+  const moveToLeft = panelSide === 'right'
+
   return (
     <aside className="rightpanel">
       <div className="rp-code">
         <div className="rp-tabs">
-          {CODE_TABS.map((t) => (
-            <button key={t} className={codeTab === t ? 'active' : ''} onClick={() => setCodeTab(t)}>
-              {t}
-            </button>
-          ))}
-          <button className="run-btn">Run</button>
-        </div>
-        <div className="rp-file">
-          <span>{fileLabel}</span>
-          {workspace?.truncated && <span className="rp-warn">Preview truncated</span>}
-          {workspaceError && <span className="rp-warn">{workspaceError}</span>}
-          <button disabled={!selectedFile || saveState === 'saving'} onClick={() => void handleSave()}>
-            {saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : 'Save'}
-          </button>
-          <button onClick={() => void openWorkspace('file')}>Upload File</button>
-        </div>
-        <div className="code-editor">
-          <div className="code-gutter" aria-hidden="true">
-            {lineNumbers.map((line) => (
-              <span key={line}>{line}</span>
+          <div className="rp-tabgroup" role="tablist">
+            {CODE_TABS.map((t) => (
+              <button
+                key={t}
+                role="tab"
+                aria-selected={codeTab === t}
+                className={codeTab === t ? 'active' : ''}
+                onClick={() => setCodeTab(t)}
+              >
+                {t}
+              </button>
             ))}
           </div>
-          <textarea
-            className="code-input"
-            spellCheck={false}
-            value={code}
-            onChange={(e) => handleCodeChange(e.target.value)}
-          />
+          <div className="rp-actions">
+            <button
+              className="panel-move-btn"
+              title={moveToLeft ? 'Move code panel to the left' : 'Move code panel to the right'}
+              onClick={() => setPanelSide(moveToLeft ? 'left' : 'right')}
+            >
+              <span className="mv-arrow" aria-hidden="true">{moveToLeft ? '‹' : '›'}</span>
+              <span>Move {moveToLeft ? 'left' : 'right'}</span>
+            </button>
+            <button
+              className={`run-btn${running ? ' is-running' : ''}`}
+              onClick={handleRun}
+              title={running ? 'Stop the running file' : 'Run the open file'}
+            >
+              <span className="run-glyph" aria-hidden="true">{running ? '■' : '▶'}</span>
+              {running ? 'Stop' : 'Run'}
+            </button>
+          </div>
         </div>
+
+        {codeTab === 'CODE' && (
+          <>
+            <div className="rp-file">
+              <span className="file-path-label" title={fileLabel}>{fileLabel}</span>
+              {workspace?.truncated && <span className="rp-warn">Preview truncated</span>}
+              {workspaceError && <span className="rp-warn">{workspaceError}</span>}
+              <button disabled={!selectedFile || saveState === 'saving'} onClick={() => void handleSave()}>
+                {saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : 'Save'}
+              </button>
+              <button onClick={() => void openWorkspace('file')}>Upload File</button>
+            </div>
+            <div className="code-editor">
+              <div className="code-gutter" aria-hidden="true">
+                <div style={{ transform: `translateY(${-scroll.top}px)` }}>
+                  {lineNumbers.map((line) => (
+                    <span key={line}>{line}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="code-input-wrap">
+                <pre
+                  className="code-highlight"
+                  aria-hidden="true"
+                  style={{ transform: `translate(${-scroll.left}px, ${-scroll.top}px)` }}
+                >
+                  {highlightedLines.map((line, index) => (
+                    <div className="code-highlight-line" key={index}>
+                      {line.length > 0 ? line : '\u00a0'}
+                    </div>
+                  ))}
+                </pre>
+                <textarea
+                  ref={inputRef}
+                  className="code-input"
+                  spellCheck={false}
+                  value={code}
+                  onChange={(e) => handleCodeChange(e.target.value)}
+                  onScroll={handleScroll}
+                />
+              </div>
+            </div>
+          </>
+        )}
+
+        {codeTab === 'OUTPUT' && (
+          <>
+            <div className="rp-output-bar">
+              <span className={`run-status ${running ? 'on' : ''}`}>
+                {running ? 'Running\u2026' : 'Idle'}
+              </span>
+              <span className="file-path-label" title={fileLabel}>{fileLabel}</span>
+              <button className="grow" disabled={!running} onClick={() => stopRun()}>
+                Stop
+              </button>
+              <button disabled={running || runOutput.length === 0} onClick={() => clearRunOutput()}>
+                Clear
+              </button>
+            </div>
+            <div className="rp-output" ref={outputRef}>
+              <pre className="rp-output-body">
+                {runOutput.length === 0 ? (
+                  <span className="out-system">
+                    No output yet. Press Run to execute the open file.
+                  </span>
+                ) : (
+                  runOutput.map((line, index) => (
+                    <span key={index} className={`out-${line.stream}`}>
+                      {line.chunk}
+                    </span>
+                  ))
+                )}
+              </pre>
+            </div>
+          </>
+        )}
+
+        {codeTab === 'TERMINAL' && (
+          <div className="rp-empty">
+            Live terminals run in the model panes on the left. Launch a session there to
+            interact with a shell.
+          </div>
+        )}
+
+        {codeTab === 'PROBLEMS' && (
+          <div className="rp-empty">No problems detected in the open file.</div>
+        )}
       </div>
 
     </aside>

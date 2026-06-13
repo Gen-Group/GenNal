@@ -4,6 +4,9 @@ import type {
   PtyCreatePayload,
   PtyData,
   PtyExit,
+  RunExit,
+  RunOutput,
+  RunStartPayload,
   SystemStats,
   WorkspaceFile,
   WorkspaceKind,
@@ -27,6 +30,19 @@ const api = {
   ptyResize: (id: string, cols: number, rows: number): void =>
     ipcRenderer.send('pty:resize', { id, cols, rows }),
   ptyKill: (id: string): void => ipcRenderer.send('pty:kill', { id }),
+
+  runStart: (payload: RunStartPayload): void => ipcRenderer.send('run:start', payload),
+  runStop: (): void => ipcRenderer.send('run:stop'),
+  onRunData: (cb: (o: RunOutput) => void): (() => void) => {
+    const handler = (_e: unknown, o: RunOutput): void => cb(o)
+    ipcRenderer.on('run:data', handler)
+    return () => ipcRenderer.removeListener('run:data', handler)
+  },
+  onRunExit: (cb: (e: RunExit) => void): (() => void) => {
+    const handler = (_e: unknown, e: RunExit): void => cb(e)
+    ipcRenderer.on('run:exit', handler)
+    return () => ipcRenderer.removeListener('run:exit', handler)
+  },
 
   onPtyData: (cb: (d: PtyData) => void): (() => void) => {
     const handler = (_e: unknown, d: PtyData): void => cb(d)
