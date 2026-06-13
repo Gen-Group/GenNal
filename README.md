@@ -5,6 +5,17 @@ each in its own live terminal pane, with a shared code view and an AI assistant 
 
 ![status](https://img.shields.io/badge/status-built-7c5cff) ![platform](https://img.shields.io/badge/platform-Windows-4285f4)
 
+## Download & Install (Windows)
+
+Grab the latest installer from the [**Releases**](https://github.com/Gen-Group/GenNal/releases/latest) page:
+
+1. Download **`GenNal-Setup-1.0.0.exe`** from the latest release.
+2. Run it and follow the prompts (you can choose the install location).
+3. Launch **GenNal** from the Start Menu or desktop shortcut.
+
+> The installer is currently unsigned, so Windows SmartScreen may warn you.
+> Click **More info → Run anyway** to continue.
+
 ## Quick start (dev)
 
 ```powershell
@@ -21,13 +32,13 @@ npm run dev            # launch the app with hot reload
 ## Build the .exe
 
 ```powershell
-npm run dist:win       # → dist/GanNal-Setup-1.0.0.exe  (NSIS installer)
+npm run dist:win       # → dist/GenNal-Setup-1.0.0.exe  (NSIS installer)
 ```
 
 Then publish it on the website:
 
 ```powershell
-Copy-Item dist\GanNal-Setup-1.0.0.exe website\downloads\GanNal-Setup.exe
+Copy-Item dist\GenNal-Setup-1.0.0.exe website\downloads\GenNal-Setup.exe
 ```
 
 ## What it does
