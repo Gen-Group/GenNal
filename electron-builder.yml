@@ -30,5 +30,21 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: GenNal
 
+mac:
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  artifactName: GenNal-${version}-${arch}.${ext}
+  # Unsigned build: lets the app run locally without an Apple Developer cert.
+  # macOS will still show a Gatekeeper warning the first time (see notes below).
+  identity: null
+
+dmg:
+  title: GenNal ${version}
+
 # After building, copy dist/GenNal-Setup-1.0.0.exe to
 # website/downloads/GenNal-Setup.exe to publish it on the site.
