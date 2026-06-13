@@ -51,6 +51,25 @@ export interface Profile {
   avatar: string
 }
 
+export interface GeneralSettings {
+  restoreWorkspaceOnLaunch: boolean
+}
+
+export interface BrowserSettings {
+  homeUrl: string
+  openExternal: boolean
+  saveHistory: boolean
+  attachWorkspaceContext: boolean
+}
+
+export interface TerminalSettings {
+  fontFamily: string
+  fontSize: number
+  cursorBlink: boolean
+  scrollback: number
+  focusNewSessions: boolean
+}
+
 export interface ImagePreview {
   name: string
   relativePath: string
@@ -75,6 +94,9 @@ interface AppState {
   settingsOpen: boolean
   theme: ThemeName
   profile: Profile
+  generalSettings: GeneralSettings
+  browserSettings: BrowserSettings
+  terminalSettings: TerminalSettings
   profileSetupOpen: boolean
   workspace: WorkspaceOpenResult | null
   workspaceError: string | null
@@ -99,9 +121,13 @@ interface AppState {
   toggleSettings: (v?: boolean) => void
   setTheme: (theme: ThemeName) => void
   setProfile: (profile: Profile) => void
+  setGeneralSettings: (settings: Partial<GeneralSettings>) => void
+  setBrowserSettings: (settings: Partial<BrowserSettings>) => void
+  setTerminalSettings: (settings: Partial<TerminalSettings>) => void
   toggleProfileSetup: (v?: boolean) => void
   openWorkspace: (kind: WorkspaceKind) => Promise<void>
   restoreWorkspace: () => Promise<void>
+  clearWorkspace: () => void
   openWorkspaceFile: (file: WorkspaceFile) => Promise<void>
   openImagePreview: (file: WorkspaceFile) => Promise<void>
   closeImagePreview: () => void
@@ -223,6 +249,25 @@ function clearWorkspaceRef(): void {
 }
 
 const EMPTY_PROFILE: Profile = { name: '', role: '', avatar: '' }
+const GENERAL_STORAGE = 'gennal.generalSettings'
+const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
+  restoreWorkspaceOnLaunch: true
+}
+const BROWSER_STORAGE = 'gennal.browserSettings'
+const DEFAULT_BROWSER_SETTINGS: BrowserSettings = {
+  homeUrl: 'https://www.google.com',
+  openExternal: true,
+  saveHistory: true,
+  attachWorkspaceContext: true
+}
+const TERMINAL_STORAGE = 'gennal.terminalSettings'
+const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
+  fontFamily: 'JetBrains Mono, Consolas, monospace',
+  fontSize: 12.5,
+  cursorBlink: true,
+  scrollback: 2000,
+  focusNewSessions: true
+}
 
 function loadProfile(): Profile {
   try {
@@ -239,6 +284,78 @@ function loadProfile(): Profile {
     /* ignore storage errors */
   }
   return EMPTY_PROFILE
+}
+
+function loadGeneralSettings(): GeneralSettings {
+  try {
+    const raw = window.localStorage.getItem(GENERAL_STORAGE)
+    if (!raw) return DEFAULT_GENERAL_SETTINGS
+    const parsed = JSON.parse(raw) as Partial<GeneralSettings>
+    return {
+      restoreWorkspaceOnLaunch:
+        typeof parsed.restoreWorkspaceOnLaunch === 'boolean'
+          ? parsed.restoreWorkspaceOnLaunch
+          : DEFAULT_GENERAL_SETTINGS.restoreWorkspaceOnLaunch
+    }
+  } catch {
+    return DEFAULT_GENERAL_SETTINGS
+  }
+}
+
+function loadBrowserSettings(): BrowserSettings {
+  try {
+    const raw = window.localStorage.getItem(BROWSER_STORAGE)
+    if (!raw) return DEFAULT_BROWSER_SETTINGS
+    const parsed = JSON.parse(raw) as Partial<BrowserSettings>
+    return {
+      homeUrl:
+        typeof parsed.homeUrl === 'string' && parsed.homeUrl.trim()
+          ? parsed.homeUrl.trim()
+          : DEFAULT_BROWSER_SETTINGS.homeUrl,
+      openExternal:
+        typeof parsed.openExternal === 'boolean'
+          ? parsed.openExternal
+          : DEFAULT_BROWSER_SETTINGS.openExternal,
+      saveHistory:
+        typeof parsed.saveHistory === 'boolean'
+          ? parsed.saveHistory
+          : DEFAULT_BROWSER_SETTINGS.saveHistory,
+      attachWorkspaceContext:
+        typeof parsed.attachWorkspaceContext === 'boolean'
+          ? parsed.attachWorkspaceContext
+          : DEFAULT_BROWSER_SETTINGS.attachWorkspaceContext
+    }
+  } catch {
+    return DEFAULT_BROWSER_SETTINGS
+  }
+}
+
+function loadTerminalSettings(): TerminalSettings {
+  try {
+    const raw = window.localStorage.getItem(TERMINAL_STORAGE)
+    if (!raw) return DEFAULT_TERMINAL_SETTINGS
+    const parsed = JSON.parse(raw) as Partial<TerminalSettings>
+    const fontSize = Number(parsed.fontSize)
+    const scrollback = Number(parsed.scrollback)
+    return {
+      ...DEFAULT_TERMINAL_SETTINGS,
+      fontFamily:
+        typeof parsed.fontFamily === 'string' && parsed.fontFamily.trim()
+          ? parsed.fontFamily
+          : DEFAULT_TERMINAL_SETTINGS.fontFamily,
+      fontSize: Number.isFinite(fontSize) ? Math.min(18, Math.max(10, fontSize)) : DEFAULT_TERMINAL_SETTINGS.fontSize,
+      cursorBlink: typeof parsed.cursorBlink === 'boolean' ? parsed.cursorBlink : DEFAULT_TERMINAL_SETTINGS.cursorBlink,
+      scrollback: [1000, 2000, 5000, 10000].includes(scrollback)
+        ? scrollback
+        : DEFAULT_TERMINAL_SETTINGS.scrollback,
+      focusNewSessions:
+        typeof parsed.focusNewSessions === 'boolean'
+          ? parsed.focusNewSessions
+          : DEFAULT_TERMINAL_SETTINGS.focusNewSessions
+    }
+  } catch {
+    return DEFAULT_TERMINAL_SETTINGS
+  }
 }
 
 const TERMINAL_ACCENTS = ['#22c55e', '#2f8cff', '#7c3aed', '#f97316']
@@ -273,6 +390,9 @@ export const useStore = create<AppState>((set, get) => ({
   settingsOpen: false,
   theme: INITIAL_THEME,
   profile: loadProfile(),
+  generalSettings: loadGeneralSettings(),
+  browserSettings: loadBrowserSettings(),
+  terminalSettings: loadTerminalSettings(),
   profileSetupOpen: loadProfile().name === '',
   workspace: null,
   workspaceError: null,
@@ -290,7 +410,10 @@ export const useStore = create<AppState>((set, get) => ({
       get().sessions.length,
       get().workspace?.kind === 'project' ? get().workspace?.path : undefined
     )
-    set((s) => ({ sessions: [...s.sessions, session], activeId: session.id }))
+    set((s) => ({
+      sessions: [...s.sessions, session],
+      activeId: s.terminalSettings.focusNewSessions ? session.id : s.activeId
+    }))
   },
 
   removeSession: (id) =>
@@ -385,6 +508,56 @@ export const useStore = create<AppState>((set, get) => ({
     set({ profile: clean, profileSetupOpen: false })
   },
 
+  setGeneralSettings: (settings) => {
+    set((s) => {
+      const next: GeneralSettings = { ...s.generalSettings, ...settings }
+      try {
+        window.localStorage.setItem(GENERAL_STORAGE, JSON.stringify(next))
+      } catch {
+        /* ignore storage errors */
+      }
+      return { generalSettings: next }
+    })
+  },
+
+  setBrowserSettings: (settings) => {
+    set((s) => {
+      const next: BrowserSettings = {
+        ...s.browserSettings,
+        ...settings,
+        homeUrl:
+          typeof settings.homeUrl === 'string'
+            ? settings.homeUrl.trim()
+            : s.browserSettings.homeUrl
+      }
+      try {
+        window.localStorage.setItem(BROWSER_STORAGE, JSON.stringify(next))
+      } catch {
+        /* ignore storage errors */
+      }
+      return { browserSettings: next }
+    })
+  },
+
+  setTerminalSettings: (settings) => {
+    set((s) => {
+      const next: TerminalSettings = {
+        ...s.terminalSettings,
+        ...settings,
+        fontSize:
+          typeof settings.fontSize === 'number'
+            ? Math.min(18, Math.max(10, settings.fontSize))
+            : s.terminalSettings.fontSize
+      }
+      try {
+        window.localStorage.setItem(TERMINAL_STORAGE, JSON.stringify(next))
+      } catch {
+        /* ignore storage errors */
+      }
+      return { terminalSettings: next }
+    })
+  },
+
   toggleProfileSetup: (v) => set((s) => ({ profileSetupOpen: v ?? !s.profileSetupOpen })),
 
   openWorkspace: async (kind) => {
@@ -401,6 +574,7 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   restoreWorkspace: async () => {
+    if (!get().generalSettings.restoreWorkspaceOnLaunch) return
     if (get().workspace) return
 
     const saved = loadSavedWorkspace()
@@ -418,6 +592,11 @@ export const useStore = create<AppState>((set, get) => ({
           err instanceof Error ? err.message : 'Saved workspace could not be restored.'
       })
     }
+  },
+
+  clearWorkspace: () => {
+    clearWorkspaceRef()
+    set({ workspace: null, workspaceError: null, imagePreview: null })
   },
 
   openWorkspaceFile: async (file) => {

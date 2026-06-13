@@ -17,6 +17,7 @@ export default function App(): JSX.Element {
   const appendRunOutput = useStore((s) => s.appendRunOutput)
   const finishRun = useStore((s) => s.finishRun)
   const restoreWorkspace = useStore((s) => s.restoreWorkspace)
+  const restoreWorkspaceOnLaunch = useStore((s) => s.generalSettings.restoreWorkspaceOnLaunch)
   const togglePalette = useStore((s) => s.togglePalette)
   const panelSide = useStore((s) => s.panelSide)
   const panelWidth = useStore((s) => s.panelWidth)
@@ -35,7 +36,6 @@ export default function App(): JSX.Element {
 
   useEffect(() => {
     window.api.listModels().then(setModels)
-    void restoreWorkspace()
     const offStats = window.api.onStats(setStats)
     const offRunData = window.api.onRunData(appendRunOutput)
     const offRunExit = window.api.onRunExit(finishRun)
@@ -44,7 +44,11 @@ export default function App(): JSX.Element {
       offRunData()
       offRunExit()
     }
-  }, [setModels, setStats, appendRunOutput, finishRun, restoreWorkspace])
+  }, [setModels, setStats, appendRunOutput, finishRun])
+
+  useEffect(() => {
+    if (restoreWorkspaceOnLaunch) void restoreWorkspace()
+  }, [restoreWorkspace, restoreWorkspaceOnLaunch])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {

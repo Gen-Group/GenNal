@@ -127,7 +127,7 @@ export default function LayoutToolbar(): JSX.Element {
         </div>
       </div>
 
-      <ModelMenu label="+ New Model" variant="primary" />
+      <ModelMenu label="+ New Session" variant="primary" />
     </div>
   )
 }

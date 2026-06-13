@@ -1,6 +1,6 @@
 {
   "name": "gennal",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "GenNal — Multi-Model AI Cockpit. Launch Codex, Claude & Gemini side by side.",
   "author": "GenNal",
   "main": "./out/main/index.js",

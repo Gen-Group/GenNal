@@ -188,6 +188,14 @@ const PRIORITY_OPTIONS: { id: TaskPriority; label: string }[] = [
   { id: 'high', label: 'High priority' }
 ]
 
+const TERMINAL_FONT_OPTIONS = [
+  'JetBrains Mono, Consolas, monospace',
+  'Consolas, monospace',
+  'Cascadia Mono, Consolas, monospace'
+]
+
+const TERMINAL_SCROLLBACK_OPTIONS = [1000, 2000, 5000, 10000]
+
 interface TaskSourceConfig {
   id: TaskSourceId
   enabled: boolean
@@ -377,16 +385,31 @@ function normalizeHost(value: string): string {
 export default function SettingsPanel(): JSX.Element | null {
   const open = useStore((s) => s.settingsOpen)
   const toggleSettings = useStore((s) => s.toggleSettings)
+  const generalSettings = useStore((s) => s.generalSettings)
+  const setGeneralSettings = useStore((s) => s.setGeneralSettings)
+  const browserSettings = useStore((s) => s.browserSettings)
+  const setBrowserSettings = useStore((s) => s.setBrowserSettings)
   const panelSide = useStore((s) => s.panelSide)
   const setPanelSide = useStore((s) => s.setPanelSide)
+  const panelOpen = useStore((s) => s.panelOpen)
+  const togglePanel = useStore((s) => s.togglePanel)
+  const sidebarOpen = useStore((s) => s.sidebarOpen)
+  const toggleSidebar = useStore((s) => s.toggleSidebar)
   const rows = useStore((s) => s.rows)
   const cols = useStore((s) => s.cols)
   const setGrid = useStore((s) => s.setGrid)
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
+  const terminalSettings = useStore((s) => s.terminalSettings)
+  const setTerminalSettings = useStore((s) => s.setTerminalSettings)
   const models = useStore((s) => s.models)
   const sessions = useStore((s) => s.sessions)
   const stats = useStore((s) => s.stats)
+  const profile = useStore((s) => s.profile)
+  const toggleProfileSetup = useStore((s) => s.toggleProfileSetup)
+  const workspace = useStore((s) => s.workspace)
+  const openWorkspace = useStore((s) => s.openWorkspace)
+  const clearWorkspace = useStore((s) => s.clearWorkspace)
   const [active, setActive] = useState<SettingsKey>('appearance')
   const [taskSettings, setTaskSettings] = useState<TaskSourceSettings>(loadTaskSourceSettings)
   const [lastRefresh, setLastRefresh] = useState('Ready')
@@ -483,6 +506,14 @@ export default function SettingsPanel(): JSX.Element | null {
     persistServers(servers.map((s) => (s.id === id ? { ...s, connected: !s.connected } : s)))
   }
 
+  const openBrowserHome = (): void => {
+    if (!browserSettings.openExternal) return
+    const raw = browserSettings.homeUrl.trim()
+    if (!raw) return
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
   const connectedServers = servers.filter((s) => s.connected).length
 
   const aiModels = models.filter((m) => m.id !== 'custom')
@@ -532,7 +563,83 @@ export default function SettingsPanel(): JSX.Element | null {
             <button className="settings-close" onClick={() => toggleSettings(false)}>Close</button>
           </div>
 
-          {active === 'appearance' ? (
+          {active === 'general' ? (
+            <div className="settings-content general-panel">
+              <div className="settings-summary-grid">
+                <div className="settings-summary">
+                  <span>Workspace</span>
+                  <strong>{workspace ? workspace.kind : 'None'}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Sessions</span>
+                  <strong>{totalSessions}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Profile</span>
+                  <strong>{profile.name ? 'Set' : 'Empty'}</strong>
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div>
+                  <h3>Startup</h3>
+                  <p>Choose whether GenNal reopens the last file or project when the app launches.</p>
+                </div>
+                <button
+                  className={`task-toggle ${generalSettings.restoreWorkspaceOnLaunch ? 'on' : ''}`}
+                  aria-pressed={generalSettings.restoreWorkspaceOnLaunch}
+                  onClick={() =>
+                    setGeneralSettings({
+                      restoreWorkspaceOnLaunch: !generalSettings.restoreWorkspaceOnLaunch
+                    })
+                  }
+                >
+                  <span />
+                </button>
+              </div>
+
+              <div className="settings-card general-workspace-card">
+                <div>
+                  <h3>Workspace</h3>
+                  <p>
+                    {workspace
+                      ? `${workspace.name} · ${workspace.files.length} file${workspace.files.length === 1 ? '' : 's'}`
+                      : 'Open a file or project folder to start working.'}
+                  </p>
+                </div>
+                <div className="general-actions">
+                  <button className="settings-close" onClick={() => void openWorkspace('file')}>Open file</button>
+                  <button className="settings-close" onClick={() => void openWorkspace('project')}>Open project</button>
+                  <button className="settings-close danger" disabled={!workspace} onClick={clearWorkspace}>Forget</button>
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div>
+                  <h3>Workspace chrome</h3>
+                  <p>Show or hide the navigation sidebar and code panel.</p>
+                </div>
+                <div className="settings-grid-actions">
+                  <button className={sidebarOpen ? 'active' : ''} onClick={() => toggleSidebar()}>
+                    Sidebar
+                  </button>
+                  <button className={panelOpen ? 'active' : ''} onClick={() => togglePanel()}>
+                    Code panel
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div>
+                  <h3>Profile</h3>
+                  <p>{profile.name ? `${profile.name}${profile.role ? ` · ${profile.role}` : ''}` : 'Add your name and role for the sidebar profile.'}</p>
+                </div>
+                <button className="settings-close" onClick={() => toggleProfileSetup(true)}>
+                  Edit profile
+                </button>
+              </div>
+            </div>
+          ) : active === 'appearance' ? (
             <div className="settings-content">
               <div className="settings-card">
                 <div>
@@ -578,6 +685,225 @@ export default function SettingsPanel(): JSX.Element | null {
                     </button>
                   ))}
                 </div>
+              </div>
+            </div>
+          ) : active === 'terminal' ? (
+            <div className="settings-content terminal-panel">
+              <div className="settings-summary-grid">
+                <div className="settings-summary">
+                  <span>Active terminals</span>
+                  <strong>{runningSessions}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Total sessions</span>
+                  <strong>{totalSessions}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Scrollback</span>
+                  <strong>{terminalSettings.scrollback.toLocaleString()}</strong>
+                </div>
+              </div>
+
+              <div className="settings-card terminal-preview-card">
+                <div>
+                  <h3>Terminal preview</h3>
+                  <p>These preferences apply to new terminals and update open terminal panes.</p>
+                </div>
+                <div
+                  className="terminal-preview"
+                  style={{
+                    fontFamily: terminalSettings.fontFamily,
+                    fontSize: terminalSettings.fontSize
+                  }}
+                >
+                  <span className="terminal-preview-prompt">$</span> codex --help
+                  <br />
+                  <span className="terminal-preview-muted">Ready for commands</span>
+                  <span className={terminalSettings.cursorBlink ? 'terminal-preview-cursor blink' : 'terminal-preview-cursor'} />
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div>
+                  <h3>Font size</h3>
+                  <p>Set the terminal text size used by every model pane.</p>
+                </div>
+                <div className="settings-grid-actions">
+                  {[11, 12.5, 14, 16].map((size) => (
+                    <button
+                      key={size}
+                      className={terminalSettings.fontSize === size ? 'active' : ''}
+                      onClick={() => setTerminalSettings({ fontSize: size })}
+                    >
+                      {size}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-card terminal-font-card">
+                <div>
+                  <h3>Font family</h3>
+                  <p>Choose a monospace font stack for xterm panes.</p>
+                </div>
+                <div className="terminal-font-options">
+                  {TERMINAL_FONT_OPTIONS.map((font) => (
+                    <button
+                      key={font}
+                      className={terminalSettings.fontFamily === font ? 'active' : ''}
+                      style={{ fontFamily: font }}
+                      onClick={() => setTerminalSettings({ fontFamily: font })}
+                    >
+                      {font.split(',')[0]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-card task-options-card">
+                <div>
+                  <h3>Behavior</h3>
+                  <p>Control cursor and session launch behavior.</p>
+                </div>
+                <div className="task-option-list">
+                  <label className="task-check">
+                    <input
+                      type="checkbox"
+                      checked={terminalSettings.cursorBlink}
+                      onChange={(event) => setTerminalSettings({ cursorBlink: event.target.checked })}
+                    />
+                    <span>Blink terminal cursor</span>
+                  </label>
+                  <label className="task-check">
+                    <input
+                      type="checkbox"
+                      checked={terminalSettings.focusNewSessions}
+                      onChange={(event) => setTerminalSettings({ focusNewSessions: event.target.checked })}
+                    />
+                    <span>Focus newly launched sessions</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="settings-card task-limit-card">
+                <div>
+                  <h3>Scrollback buffer</h3>
+                  <p>Choose how many terminal lines are kept in memory.</p>
+                </div>
+                <div className="settings-grid-actions">
+                  {TERMINAL_SCROLLBACK_OPTIONS.map((limit) => (
+                    <button
+                      key={limit}
+                      className={terminalSettings.scrollback === limit ? 'active' : ''}
+                      onClick={() => setTerminalSettings({ scrollback: limit })}
+                    >
+                      {limit >= 1000 ? `${limit / 1000}k` : limit}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : active === 'browser' ? (
+            <div className="settings-content browser-panel">
+              <div className="settings-summary-grid">
+                <div className="settings-summary">
+                  <span>Launcher</span>
+                  <strong>{browserSettings.openExternal ? 'On' : 'Off'}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>History</span>
+                  <strong>{browserSettings.saveHistory ? 'On' : 'Off'}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Context</span>
+                  <strong>{browserSettings.attachWorkspaceContext ? 'On' : 'Off'}</strong>
+                </div>
+              </div>
+
+              <div className="settings-card browser-home-card">
+                <div>
+                  <h3>Home page</h3>
+                  <p>Set the default page used for browser-assisted research and quick lookups.</p>
+                </div>
+                <div className="browser-home-form">
+                  <input
+                    aria-label="Browser home page"
+                    value={browserSettings.homeUrl}
+                    placeholder="https://www.google.com"
+                    onChange={(event) => setBrowserSettings({ homeUrl: event.target.value })}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') openBrowserHome()
+                    }}
+                  />
+                  <button
+                    className="remote-add-btn"
+                    disabled={!browserSettings.openExternal}
+                    onClick={openBrowserHome}
+                  >
+                    Open
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div>
+                  <h3>External browser launcher</h3>
+                  <p>Open browser URLs in the system browser from GenNal.</p>
+                </div>
+                <button
+                  className={`task-toggle ${browserSettings.openExternal ? 'on' : ''}`}
+                  aria-pressed={browserSettings.openExternal}
+                  onClick={() => setBrowserSettings({ openExternal: !browserSettings.openExternal })}
+                >
+                  <span />
+                </button>
+              </div>
+
+              <div className="settings-card task-options-card">
+                <div>
+                  <h3>Browser behavior</h3>
+                  <p>Control how browser sessions feed research and workspace context.</p>
+                </div>
+                <div className="task-option-list">
+                  <label className="task-check">
+                    <input
+                      type="checkbox"
+                      checked={browserSettings.saveHistory}
+                      onChange={(event) => setBrowserSettings({ saveHistory: event.target.checked })}
+                    />
+                    <span>Remember recently opened browser URLs</span>
+                  </label>
+                  <label className="task-check">
+                    <input
+                      type="checkbox"
+                      checked={browserSettings.attachWorkspaceContext}
+                      onChange={(event) =>
+                        setBrowserSettings({ attachWorkspaceContext: event.target.checked })
+                      }
+                    />
+                    <span>Attach current workspace context to browser tasks</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div>
+                  <h3>Reset browser preferences</h3>
+                  <p>Restore the default browser URL and behavior settings.</p>
+                </div>
+                <button
+                  className="settings-close danger"
+                  onClick={() =>
+                    setBrowserSettings({
+                      homeUrl: 'https://www.google.com',
+                      openExternal: true,
+                      saveHistory: true,
+                      attachWorkspaceContext: true
+                    })
+                  }
+                >
+                  Reset
+                </button>
               </div>
             </div>
           ) : active === 'tasks' ? (

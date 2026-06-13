@@ -59,14 +59,16 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
   const sessions = useStore((s) => s.sessions)
   const addSession = useStore((s) => s.addSession)
   const setGrid = useStore((s) => s.setGrid)
+  const terminalSettings = useStore((s) => s.terminalSettings)
   const terminalNumber = sessions.findIndex((s) => s.id === session.id) + 1
 
   useEffect(() => {
     if (!termRef.current) return
     const term = new Terminal({
-      fontFamily: 'JetBrains Mono, Consolas, monospace',
-      fontSize: 12.5,
-      cursorBlink: true,
+      fontFamily: terminalSettings.fontFamily,
+      fontSize: terminalSettings.fontSize,
+      cursorBlink: terminalSettings.cursorBlink,
+      scrollback: terminalSettings.scrollback,
       theme: {
         background: '#0c0e16',
         foreground: '#d7dae6',
@@ -120,6 +122,15 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id])
+
+  useEffect(() => {
+    const term = terminalRef.current
+    if (!term) return
+    term.options.fontFamily = terminalSettings.fontFamily
+    term.options.fontSize = terminalSettings.fontSize
+    term.options.cursorBlink = terminalSettings.cursorBlink
+    term.options.scrollback = terminalSettings.scrollback
+  }, [terminalSettings])
 
   useEffect(() => {
     if (activeId === session.id) {

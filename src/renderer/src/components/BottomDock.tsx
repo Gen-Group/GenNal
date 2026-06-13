@@ -10,7 +10,7 @@ export default function BottomDock(): JSX.Element {
 
   return (
     <div className="dock">
-      <ModelMenu label="New Model" variant="ghost" />
+      <ModelMenu label="New Session" variant="ghost" />
       <button className="dock-btn" onClick={() => void openWorkspace('file')}>Upload File</button>
       <button className="dock-btn" onClick={() => void openWorkspace('project')}>Upload Project</button>
       <button className="dock-btn" onClick={() => setMode('stack')}>Split H</button>

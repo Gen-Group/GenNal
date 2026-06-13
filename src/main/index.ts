@@ -1,6 +1,6 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, protocol } from 'electron'
 import { promises as fs } from 'fs'
-import { basename, extname, join, relative } from 'path'
+import { basename, extname, join, normalize, relative } from 'path'
 import { loadModels } from './model-registry'
 import {
   createSession,
@@ -24,6 +24,61 @@ import type {
 } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
+
+// Serve the production renderer from a custom standard-origin scheme instead of
+// file://. Chromium gives file:// pages an opaque origin whose localStorage is
+// NOT persisted across restarts, which silently wiped the saved profile, theme,
+// and all settings on every launch. A standard + secure scheme persists storage
+// to disk like a normal web origin. (Dev uses an http:// origin and is fine.)
+const APP_SCHEME = 'app'
+const APP_ORIGIN = `${APP_SCHEME}://gennal`
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: APP_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  }
+])
+
+const STATIC_MIME = new Map<string, string>([
+  ['.html', 'text/html'],
+  ['.js', 'text/javascript'],
+  ['.mjs', 'text/javascript'],
+  ['.css', 'text/css'],
+  ['.json', 'application/json'],
+  ['.map', 'application/json'],
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.svg', 'image/svg+xml'],
+  ['.webp', 'image/webp'],
+  ['.ico', 'image/x-icon'],
+  ['.woff', 'font/woff'],
+  ['.woff2', 'font/woff2'],
+  ['.ttf', 'font/ttf'],
+  ['.txt', 'text/plain']
+])
+
+function registerAppProtocol(): void {
+  const root = normalize(join(__dirname, '../renderer'))
+  protocol.handle(APP_SCHEME, async (request) => {
+    try {
+      const { pathname } = new URL(request.url)
+      const rel = !pathname || pathname === '/' ? '/index.html' : decodeURIComponent(pathname)
+      const filePath = normalize(join(root, rel))
+      // Never serve anything outside the bundled renderer directory.
+      if (filePath !== root && !filePath.startsWith(root + (process.platform === 'win32' ? '\\' : '/'))) {
+        return new Response('Forbidden', { status: 403 })
+      }
+      const data = await fs.readFile(filePath)
+      const mime = STATIC_MIME.get(extname(filePath).toLowerCase()) ?? 'application/octet-stream'
+      return new Response(data, { headers: { 'content-type': mime } })
+    } catch {
+      return new Response('Not found', { status: 404 })
+    }
+  })
+}
 
 const PREVIEW_LIMIT = 180_000
 const MAX_PROJECT_FILES = 400
@@ -292,7 +347,7 @@ function createWindow(): void {
   if (rendererUrl) {
     mainWindow.loadURL(rendererUrl)
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    mainWindow.loadURL(`${APP_ORIGIN}/index.html`)
   }
 
   startStats(mainWindow)
@@ -378,6 +433,7 @@ function registerIpc(): void {
 }
 
 app.whenReady().then(() => {
+  registerAppProtocol()
   registerIpc()
   createWindow()
 

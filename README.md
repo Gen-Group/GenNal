@@ -24,7 +24,7 @@ Grab the latest installer from the [**Releases**](https://github.com/Gen-Group/G
 
 ### Windows
 
-1. Download **`GenNal-Setup-1.0.2.exe`** from the latest release.
+1. Download **`GenNal-Setup-1.0.3.exe`** from the latest release.
 2. Run it and follow the prompts (you can choose the install location).
 3. Launch **GenNal** from the Start Menu or desktop shortcut.
 
@@ -45,7 +45,7 @@ cd GenNal
 bash mac/install.sh      # builds GenNal and installs GenNal.app into /Applications
 ```
 
-This also produces `GenNal-1.0.2-arm64.dmg` (Apple Silicon) and `GenNal-1.0.2-x64.dmg`
+This also produces `GenNal-1.0.3-arm64.dmg` (Apple Silicon) and `GenNal-1.0.3-x64.dmg`
 (Intel) in `dist/`. See [`mac/README.md`](mac/README.md) for the full guide.
 
 The build is unsigned, so on first launch **right-click GenNal → Open → Open**
@@ -69,19 +69,19 @@ npm run dev            # launch the app with hot reload
 **Windows** (run on Windows):
 
 ```powershell
-npm run dist:win       # → dist/GenNal-Setup-1.0.2.exe  (NSIS installer)
+npm run dist:win       # → dist/GenNal-Setup-1.0.3.exe  (NSIS installer)
 ```
 
 Then publish it on the website:
 
 ```powershell
-Copy-Item dist\GenNal-Setup-1.0.2.exe website\downloads\GenNal-Setup.exe
+Copy-Item dist\GenNal-Setup-1.0.3.exe website\downloads\GenNal-Setup.exe
 ```
 
 **macOS** (must run on a Mac — native `node-pty` and `.dmg` packaging are macOS-only):
 
 ```bash
-npm run dist:mac       # → dist/GenNal-1.0.2-arm64.dmg and dist/GenNal-1.0.2-x64.dmg
+npm run dist:mac       # → dist/GenNal-1.0.3-arm64.dmg and dist/GenNal-1.0.3-x64.dmg
 ```
 
 ## What it does

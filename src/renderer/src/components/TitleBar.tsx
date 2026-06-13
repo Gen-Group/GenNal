@@ -1,5 +1,4 @@
 import { useStore } from '../store'
-import ModelMenu from './ModelMenu'
 import logoUrl from '../assets/gennal-logo.png'
 
 export default function TitleBar(): JSX.Element {
@@ -26,7 +25,6 @@ export default function TitleBar(): JSX.Element {
       </div>
 
       <div className="tb-right no-drag">
-        <ModelMenu label="+ New Session" variant="primary" />
         <button
           className={`icon-btn sidebar-toggle ${sidebarOpen ? 'active' : ''}`}
           title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}

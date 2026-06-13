@@ -7,6 +7,7 @@ import {
   type UIEvent
 } from 'react'
 import { useStore } from '../store'
+import PanelTerminal from './PanelTerminal'
 
 const CODE_TABS = ['CODE', 'OUTPUT', 'TERMINAL', 'PROBLEMS']
 
@@ -70,6 +71,7 @@ function highlightLine(line: string): JSX.Element[] {
 
 export default function RightPanel(): JSX.Element {
   const [codeTab, setCodeTab] = useState('CODE')
+  const [terminalMounted, setTerminalMounted] = useState(false)
   const [scroll, setScroll] = useState({ left: 0, top: 0 })
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const workspace = useStore((s) => s.workspace)
@@ -162,6 +164,12 @@ export default function RightPanel(): JSX.Element {
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
   }
+
+  // Spin up the panel shell the first time the TERMINAL tab is opened, then keep
+  // it mounted (hidden) so the session survives switching between tabs.
+  useEffect(() => {
+    if (codeTab === 'TERMINAL') setTerminalMounted(true)
+  }, [codeTab])
 
   // Keep the console pinned to the newest output.
   useEffect(() => {
@@ -351,11 +359,11 @@ export default function RightPanel(): JSX.Element {
           </>
         )}
 
-        {codeTab === 'TERMINAL' && (
-          <div className="rp-empty">
-            Live terminals run in the model panes on the left. Launch a session there to
-            interact with a shell.
-          </div>
+        {terminalMounted && (
+          <PanelTerminal
+            active={codeTab === 'TERMINAL'}
+            cwd={workspace?.kind === 'project' ? workspace.path : undefined}
+          />
         )}
 
         {codeTab === 'PROBLEMS' && (

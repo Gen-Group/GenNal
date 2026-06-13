@@ -38,7 +38,7 @@ export default function PaneGrid(): JSX.Element {
           <img className="ge-mark" src={logoUrl} alt="GenNal logo" />
           <h2>Launch your first model</h2>
           <p>Run Codex, Claude &amp; Gemini side by side — each in its own live session.</p>
-          <ModelMenu label="+ New Model Session" variant="primary" />
+          <ModelMenu label="+ New Session" variant="primary" />
         </div>
       </div>
     )
