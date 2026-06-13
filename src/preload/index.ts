@@ -10,6 +10,8 @@ import type {
   SystemStats,
   WorkspaceFile,
   WorkspaceKind,
+  WorkspaceImageResult,
+  WorkspaceOpenPathPayload,
   WorkspaceOpenResult,
   WorkspaceReadResult,
   WorkspaceWritePayload
@@ -20,8 +22,12 @@ const api = {
 
   openWorkspace: (kind: WorkspaceKind): Promise<WorkspaceOpenResult | null> =>
     ipcRenderer.invoke('workspace:open', kind),
+  openWorkspacePath: (payload: WorkspaceOpenPathPayload): Promise<WorkspaceOpenResult> =>
+    ipcRenderer.invoke('workspace:open-path', payload),
   readWorkspaceFile: (file: WorkspaceFile): Promise<WorkspaceReadResult> =>
     ipcRenderer.invoke('workspace:read-file', file),
+  readWorkspaceImage: (file: WorkspaceFile): Promise<WorkspaceImageResult> =>
+    ipcRenderer.invoke('workspace:read-image', file),
   writeWorkspaceFile: (payload: WorkspaceWritePayload): Promise<WorkspaceReadResult> =>
     ipcRenderer.invoke('workspace:write-file', payload),
 

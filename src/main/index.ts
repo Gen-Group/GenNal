@@ -16,6 +16,8 @@ import type {
   RunStartPayload,
   WorkspaceFile,
   WorkspaceKind,
+  WorkspaceOpenPathPayload,
+  WorkspaceImageResult,
   WorkspaceOpenResult,
   WorkspaceReadResult,
   WorkspaceWritePayload
@@ -87,6 +89,19 @@ const CODE_EXTS = new Set([
   '.tsx',
   '.vue'
 ])
+
+const IMAGE_MIME = new Map<string, string>([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+  ['.bmp', 'image/bmp'],
+  ['.svg', 'image/svg+xml'],
+  ['.ico', 'image/x-icon'],
+  ['.avif', 'image/avif']
+])
+const IMAGE_PREVIEW_LIMIT = 25 * 1024 * 1024 // 25 MB
 
 function toWorkspaceFile(path: string, root?: string, size = 0): WorkspaceFile {
   const extension = extname(path).toLowerCase()
@@ -186,6 +201,46 @@ async function listProjectFiles(root: string): Promise<WorkspaceFile[]> {
   })
 }
 
+async function openWorkspacePath(payload: WorkspaceOpenPathPayload): Promise<WorkspaceOpenResult> {
+  const stat = await fs.stat(payload.path)
+
+  if (payload.kind === 'file') {
+    if (!stat.isFile()) throw new Error('Saved workspace file is no longer available.')
+
+    const file = toWorkspaceFile(payload.path, undefined, stat.size)
+    const preview = await readPreview(file)
+    return {
+      kind: payload.kind,
+      path: payload.path,
+      name: file.name,
+      files: [file],
+      selectedFile: file,
+      content: preview.content,
+      truncated: preview.truncated
+    }
+  }
+
+  if (!stat.isDirectory()) throw new Error('Saved workspace folder is no longer available.')
+
+  const files = await listProjectFiles(payload.path)
+  const git = await readGitInfo(payload.path)
+  const selectedFile =
+    files.find((file) => file.path === payload.selectedFilePath) ??
+    files.find((file) => canPreview(file.path)) ??
+    files[0]
+  const preview = selectedFile ? await readPreview(selectedFile) : undefined
+  return {
+    kind: payload.kind,
+    path: payload.path,
+    name: basename(payload.path),
+    files,
+    git,
+    selectedFile,
+    content: preview?.content,
+    truncated: preview?.truncated
+  }
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1480,
@@ -243,42 +298,32 @@ function registerIpc(): void {
 
     if (result.canceled || result.filePaths.length === 0) return null
 
-    const pickedPath = result.filePaths[0]
-    const stat = await fs.stat(pickedPath)
+    return openWorkspacePath({ kind, path: result.filePaths[0] })
+  })
 
-    if (kind === 'file') {
-      const file = toWorkspaceFile(pickedPath, undefined, stat.size)
-      const preview = await readPreview(file)
-      return {
-        kind,
-        path: pickedPath,
-        name: file.name,
-        files: [file],
-        selectedFile: file,
-        content: preview.content,
-        truncated: preview.truncated
-      }
-    }
-
-    const files = await listProjectFiles(pickedPath)
-    const git = await readGitInfo(pickedPath)
-    const selectedFile = files.find((file) => canPreview(file.path)) ?? files[0]
-    const preview = selectedFile ? await readPreview(selectedFile) : undefined
-    return {
-      kind,
-      path: pickedPath,
-      name: basename(pickedPath),
-      files,
-      git,
-      selectedFile,
-      content: preview?.content,
-      truncated: preview?.truncated
-    }
+  ipcMain.handle('workspace:open-path', async (_e, payload: WorkspaceOpenPathPayload): Promise<WorkspaceOpenResult> => {
+    return openWorkspacePath(payload)
   })
 
   ipcMain.handle('workspace:read-file', async (_e, file: WorkspaceFile): Promise<WorkspaceReadResult> => {
     const stat = await fs.stat(file.path)
     return readPreview({ ...file, size: stat.size })
+  })
+
+  ipcMain.handle('workspace:read-image', async (_e, file: WorkspaceFile): Promise<WorkspaceImageResult> => {
+    const ext = extname(file.path).toLowerCase()
+    const mime = IMAGE_MIME.get(ext)
+    if (!mime) throw new Error('This file type cannot be previewed as an image.')
+    const stat = await fs.stat(file.path)
+    if (stat.size > IMAGE_PREVIEW_LIMIT) {
+      throw new Error('Image is too large to preview (over 25 MB).')
+    }
+    const buffer = await fs.readFile(file.path)
+    return {
+      file: { ...file, size: stat.size },
+      dataUrl: `data:${mime};base64,${buffer.toString('base64')}`,
+      mime
+    }
   })
 
   ipcMain.handle('workspace:write-file', async (_e, payload: WorkspaceWritePayload): Promise<WorkspaceReadResult> => {

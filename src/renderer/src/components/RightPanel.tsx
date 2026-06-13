@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type UIEvent } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type UIEvent
+} from 'react'
 import { useStore } from '../store'
 
 const CODE_TABS = ['CODE', 'OUTPUT', 'TERMINAL', 'PROBLEMS']
@@ -69,6 +76,11 @@ export default function RightPanel(): JSX.Element {
   const workspaceError = useStore((s) => s.workspaceError)
   const panelSide = useStore((s) => s.panelSide)
   const setPanelSide = useStore((s) => s.setPanelSide)
+  const panelWidth = useStore((s) => s.panelWidth)
+  const setPanelWidth = useStore((s) => s.setPanelWidth)
+  const panelMaximized = useStore((s) => s.panelMaximized)
+  const togglePanelMaximized = useStore((s) => s.togglePanelMaximized)
+  const togglePanel = useStore((s) => s.togglePanel)
   const openWorkspace = useStore((s) => s.openWorkspace)
   const updateWorkspaceContent = useStore((s) => s.updateWorkspaceContent)
   const saveWorkspaceFile = useStore((s) => s.saveWorkspaceFile)
@@ -119,6 +131,30 @@ export default function RightPanel(): JSX.Element {
     void runFile()
   }
 
+  const startPanelResize = (event: ReactPointerEvent<HTMLButtonElement>): void => {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const startX = event.clientX
+    const startWidth = panelWidth
+    const maxWidth = Math.min(720, Math.max(320, window.innerWidth - 520))
+
+    const onMove = (moveEvent: PointerEvent): void => {
+      const delta = panelSide === 'right' ? startX - moveEvent.clientX : moveEvent.clientX - startX
+      setPanelWidth(Math.min(maxWidth, Math.max(280, startWidth + delta)))
+    }
+
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      document.body.classList.remove('resizing-panel')
+    }
+
+    document.body.classList.add('resizing-panel')
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
   // Keep the console pinned to the newest output.
   useEffect(() => {
     if (codeTab !== 'OUTPUT') return
@@ -130,6 +166,13 @@ export default function RightPanel(): JSX.Element {
 
   return (
     <aside className="rightpanel">
+      <button
+        className="panel-resizer"
+        title="Drag to resize code panel. Double-click to reset."
+        aria-label="Resize code panel"
+        onPointerDown={startPanelResize}
+        onDoubleClick={() => setPanelWidth(360)}
+      />
       <div className="rp-code">
         <div className="rp-tabs">
           <div className="rp-tabgroup" role="tablist">
@@ -153,6 +196,33 @@ export default function RightPanel(): JSX.Element {
             >
               <span className="mv-arrow" aria-hidden="true">{moveToLeft ? '‹' : '›'}</span>
               <span>Move {moveToLeft ? 'left' : 'right'}</span>
+            </button>
+            <button
+              className={`rp-icon-btn ${panelMaximized ? 'active' : ''}`}
+              title={panelMaximized ? 'Exit full screen' : 'Full screen code panel'}
+              aria-label={panelMaximized ? 'Exit full screen' : 'Full screen code panel'}
+              aria-pressed={panelMaximized}
+              onClick={() => togglePanelMaximized()}
+            >
+              {panelMaximized ? (
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M6 2v2.5A1.5 1.5 0 0 1 4.5 6H2M14 6h-2.5A1.5 1.5 0 0 1 10 4.5V2M10 14v-2.5A1.5 1.5 0 0 1 11.5 10H14M2 10h2.5A1.5 1.5 0 0 1 6 11.5V14" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M2 6V3.5A1.5 1.5 0 0 1 3.5 2H6M10 2h2.5A1.5 1.5 0 0 1 14 3.5V6M14 10v2.5a1.5 1.5 0 0 1-1.5 1.5H10M6 14H3.5A1.5 1.5 0 0 1 2 12.5V10" />
+                </svg>
+              )}
+            </button>
+            <button
+              className="rp-icon-btn rp-close-btn"
+              title="Close code panel"
+              aria-label="Close code panel"
+              onClick={() => togglePanel(false)}
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+                <path d="M4 4l8 8M12 4l-8 8" />
+              </svg>
             </button>
             <button
               className={`run-btn${running ? ' is-running' : ''}`}

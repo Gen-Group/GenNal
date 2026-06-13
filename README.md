@@ -9,7 +9,7 @@ each in its own live terminal pane, with a shared code view and an AI assistant 
 
 Grab the latest installer from the [**Releases**](https://github.com/Gen-Group/GenNal/releases/latest) page:
 
-1. Download **`GenNal-Setup-1.0.0.exe`** from the latest release.
+1. Download **`GenNal-Setup-1.0.1.exe`** from the latest release.
 2. Run it and follow the prompts (you can choose the install location).
 3. Launch **GenNal** from the Start Menu or desktop shortcut.
 
@@ -32,13 +32,13 @@ npm run dev            # launch the app with hot reload
 ## Build the .exe
 
 ```powershell
-npm run dist:win       # → dist/GenNal-Setup-1.0.0.exe  (NSIS installer)
+npm run dist:win       # → dist/GenNal-Setup-1.0.1.exe  (NSIS installer)
 ```
 
 Then publish it on the website:
 
 ```powershell
-Copy-Item dist\GenNal-Setup-1.0.0.exe website\downloads\GenNal-Setup.exe
+Copy-Item dist\GenNal-Setup-1.0.1.exe website\downloads\GenNal-Setup.exe
 ```
 
 ## What it does

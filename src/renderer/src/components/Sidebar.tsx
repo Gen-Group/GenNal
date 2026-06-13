@@ -18,13 +18,24 @@ interface MutableFileTreeNode {
   fileCount: number
 }
 
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico', '.avif']
+
+function fileExt(file: WorkspaceFile): string {
+  return (file.extension || file.name.match(/\.[^.]+$/)?.[0] || '').toLowerCase()
+}
+
+function isImageFile(file: WorkspaceFile): boolean {
+  return IMAGE_EXTS.includes(fileExt(file))
+}
+
 function fileKind(file: WorkspaceFile): string {
-  const ext = file.extension || file.name.match(/^\.[^.]+$/)?.[0] || ''
+  const ext = fileExt(file)
   if (['.ts', '.tsx', '.js', '.jsx'].includes(ext)) return 'js'
   if (ext === '.dart') return 'dart'
   if (['.css', '.scss'].includes(ext)) return 'css'
   if (['.json', '.yaml', '.yml'].includes(ext)) return 'data'
   if (['.md', '.txt'].includes(ext)) return 'doc'
+  if (IMAGE_EXTS.includes(ext)) return 'img'
   if (['.env'].includes(ext) || file.name.startsWith('.env')) return 'env'
   return 'code'
 }
@@ -107,6 +118,13 @@ function workspaceInitial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || 'W'
 }
 
+function userInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '+'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
 function Spark({ color }: { color: string }): JSX.Element {
   // Decorative sparkline matching the screenshot's System Overview.
   const pts = '0,14 12,9 24,12 36,5 48,10 60,3 72,8 84,6 96,11'
@@ -127,10 +145,13 @@ export default function Sidebar(): JSX.Element {
   const addSession = useStore((s) => s.addSession)
   const stats = useStore((s) => s.stats)
   const togglePalette = useStore((s) => s.togglePalette)
+  const profile = useStore((s) => s.profile)
+  const toggleProfileSetup = useStore((s) => s.toggleProfileSetup)
   const workspace = useStore((s) => s.workspace)
   const workspaceError = useStore((s) => s.workspaceError)
   const openWorkspace = useStore((s) => s.openWorkspace)
   const openWorkspaceFile = useStore((s) => s.openWorkspaceFile)
+  const openImagePreview = useStore((s) => s.openImagePreview)
   const running = sessions.filter((s) => s.status === 'running').length
   const fileTree = workspace ? buildFileTree(workspace.files.slice(0, 120)) : undefined
   const menuFolder = folderMenu && fileTree ? findFolder(fileTree, folderMenu.folder) : undefined
@@ -138,8 +159,11 @@ export default function Sidebar(): JSX.Element {
   const primarySessions = sessions.slice(0, 3)
   const aiModel = models.find((model) => model.id === 'codex') ?? models.find((model) => model.id !== 'custom')
   const cliModel = models.find((model) => model.id === 'custom') ?? models[0]
-  const branchName = workspace?.git?.branch ?? 'main'
-  const branchUrl = workspace?.git?.branchUrl
+  const git = workspace?.git
+  const isRepo = Boolean(git)
+  const branchName = git?.branch ?? ''
+  const branchUrl = git?.branchUrl
+  const hasRemote = Boolean(git?.remoteUrl)
 
   useEffect(() => {
     if (!folderMenu) return
@@ -178,10 +202,11 @@ export default function Sidebar(): JSX.Element {
       key={file.path}
       className={`file-item ${workspace?.selectedFile?.path === file.path ? 'active' : ''}`}
       title={`${file.relativePath} - right-click to preview`}
-      onClick={() => void openWorkspaceFile(file)}
+      onClick={() => (isImageFile(file) ? void openImagePreview(file) : void openWorkspaceFile(file))}
       onContextMenu={(event) => {
         event.preventDefault()
-        void openWorkspaceFile(file)
+        if (isImageFile(file)) void openImagePreview(file)
+        else void openWorkspaceFile(file)
       }}
     >
       <FileGlyph file={file} />
@@ -235,14 +260,25 @@ export default function Sidebar(): JSX.Element {
         <div className="workspace-top">
           <span>Workspaces</span>
           <div className="workspace-tools">
-            <button className="workspace-tool" title="Workspace filters">
-              <span className="sliders-icon" />
+            <button className="workspace-tool" title="Workspace filters" aria-label="Workspace filters">
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+                <path d="M2 4h7M12 4h2M2 8h2M7 8h7M2 12h9M14 12h0" />
+                <circle cx="10.5" cy="4" r="1.6" fill="var(--panel,#0c0e16)" />
+                <circle cx="5.5" cy="8" r="1.6" fill="var(--panel,#0c0e16)" />
+                <circle cx="12.5" cy="12" r="1.6" fill="var(--panel,#0c0e16)" />
+              </svg>
             </button>
-            <button className="workspace-tool" title="Upload file" onClick={() => void openWorkspace('file')}>
-              <span className="file-plus-icon" />
+            <button className="workspace-tool" title="Upload file" aria-label="Upload file" onClick={() => void openWorkspace('file')}>
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M9 2H4.5A1.5 1.5 0 0 0 3 3.5v9A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V6z" />
+                <path d="M9 2v4h4" />
+                <path d="M8 11.5v-3M6.5 10h3" />
+              </svg>
             </button>
-            <button className="workspace-tool" title="Open project" onClick={() => void openWorkspace('project')}>
-              +
+            <button className="workspace-tool" title="Open project" aria-label="Open project" onClick={() => void openWorkspace('project')}>
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+                <path d="M8 3v10M3 8h10" />
+              </svg>
             </button>
           </div>
         </div>
@@ -252,20 +288,37 @@ export default function Sidebar(): JSX.Element {
           <span className="workspace-filter-count">{workspace ? 1 : 0}</span>
         </div>
         <div className={`workspace-stack ${workspace ? 'active' : ''}`}>
-          <button
-            className={`workspace-branch ${branchUrl ? 'linked' : ''}`}
-            title={branchUrl ?? `Current branch: ${branchName}`}
-            onClick={openBranch}
-          >
-            <span className="branch-dot" />
-            <span className="branch-name">{branchName}</span>
-            <span className="branch-pill">primary</span>
-          </button>
+          {isRepo ? (
+            <button
+              className={`workspace-branch ${branchUrl ? 'linked' : ''}`}
+              title={git?.remoteUrl ?? `Current branch: ${branchName}`}
+              onClick={openBranch}
+            >
+              <span className="branch-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="4" y1="3" x2="4" y2="10" />
+                  <circle cx="4" cy="12" r="1.7" />
+                  <circle cx="12" cy="4" r="1.7" />
+                  <path d="M12 5.7c0 3.4-2.7 4.3-6 4.3" />
+                </svg>
+              </span>
+              <span className="branch-name">{branchName}</span>
+              <span className="branch-pill">{hasRemote ? 'remote' : 'local'}</span>
+            </button>
+          ) : (
+            <div
+              className="workspace-branch no-repo"
+              title={workspace ? 'This folder is not a git repository' : 'Open a project to see its branch'}
+            >
+              <span className="branch-dot off" />
+              <span className="branch-name">{workspace ? 'No repository' : 'No project open'}</span>
+            </div>
+          )}
           <button className="workspace-project" onClick={() => void openWorkspace('project')}>
             <span className="project-indent" />
             <span className="project-icon">{workspaceInitial(workspaceName)}</span>
             <span className="project-name">{workspaceName}</span>
-            <span className="project-meta">{workspace ? branchName : 'project'}</span>
+            <span className="project-meta">{isRepo ? branchName : workspace ? 'no repo' : 'project'}</span>
           </button>
           <div className="workspace-models">
             {aiModel && (
@@ -374,15 +427,28 @@ export default function Sidebar(): JSX.Element {
         <button className="qa" onClick={() => togglePalette(true)}>
           Command Palette <kbd>Ctrl K</kbd>
         </button>
+        <button className="qa soon" disabled title="Mobile app — coming soon">
+          Mobile <span className="soon-pill">Coming soon</span>
+        </button>
       </section>
 
-      <div className="side-user">
-        <div className="avatar">JD</div>
-        <div>
-          <div className="u-name">John Doe</div>
-          <div className="u-state">● Online</div>
+      <button
+        className={`side-user ${profile.name ? '' : 'unset'}`}
+        title={profile.name ? 'Edit profile' : 'Add your name'}
+        onClick={() => toggleProfileSetup(true)}
+      >
+        <div className={`avatar ${profile.avatar ? 'has-image' : ''}`}>
+          {profile.avatar ? (
+            <img src={profile.avatar} alt="" />
+          ) : (
+            userInitials(profile.name)
+          )}
         </div>
-      </div>
+        <div>
+          <div className="u-name">{profile.name || 'Add your name'}</div>
+          <div className="u-state">{profile.name ? (profile.role || '● Online') : 'Set up your profile'}</div>
+        </div>
+      </button>
     </aside>
   )
 }

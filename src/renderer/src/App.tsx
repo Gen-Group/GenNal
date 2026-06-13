@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, type CSSProperties } from 'react'
 import { useStore } from './store'
 import TitleBar from './components/TitleBar'
 import Sidebar from './components/Sidebar'
@@ -8,17 +8,34 @@ import RightPanel from './components/RightPanel'
 import StatusBar from './components/StatusBar'
 import CommandPalette from './components/CommandPalette'
 import SettingsPanel from './components/SettingsPanel'
+import ProfileDialog from './components/ProfileDialog'
+import ImagePreview from './components/ImagePreview'
 
 export default function App(): JSX.Element {
   const setModels = useStore((s) => s.setModels)
   const setStats = useStore((s) => s.setStats)
   const appendRunOutput = useStore((s) => s.appendRunOutput)
   const finishRun = useStore((s) => s.finishRun)
+  const restoreWorkspace = useStore((s) => s.restoreWorkspace)
   const togglePalette = useStore((s) => s.togglePalette)
   const panelSide = useStore((s) => s.panelSide)
+  const panelWidth = useStore((s) => s.panelWidth)
+  const panelOpen = useStore((s) => s.panelOpen)
+  const panelMaximized = useStore((s) => s.panelMaximized)
+  const sidebarOpen = useStore((s) => s.sidebarOpen)
+  const bodyClasses = [
+    'body',
+    `panel-${panelSide}`,
+    sidebarOpen ? '' : 'sidebar-closed',
+    panelOpen ? '' : 'panel-closed',
+    panelOpen && panelMaximized ? 'panel-max' : ''
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   useEffect(() => {
     window.api.listModels().then(setModels)
+    void restoreWorkspace()
     const offStats = window.api.onStats(setStats)
     const offRunData = window.api.onRunData(appendRunOutput)
     const offRunExit = window.api.onRunExit(finishRun)
@@ -27,7 +44,7 @@ export default function App(): JSX.Element {
       offRunData()
       offRunExit()
     }
-  }, [setModels, setStats, appendRunOutput, finishRun])
+  }, [setModels, setStats, appendRunOutput, finishRun, restoreWorkspace])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -44,18 +61,23 @@ export default function App(): JSX.Element {
   return (
     <div className="app">
       <TitleBar />
-      <div className={`body panel-${panelSide}`}>
-        <Sidebar />
-        {panelSide === 'left' && <RightPanel />}
+      <div
+        className={bodyClasses}
+        style={{ '--right-panel-width': `${panelWidth}px` } as CSSProperties}
+      >
+        {sidebarOpen && <Sidebar />}
+        {panelSide === 'left' && panelOpen && <RightPanel />}
         <main className="center">
           <LayoutToolbar />
           <PaneGrid />
         </main>
-        {panelSide === 'right' && <RightPanel />}
+        {panelSide === 'right' && panelOpen && <RightPanel />}
       </div>
       <StatusBar />
       <CommandPalette />
       <SettingsPanel />
+      <ProfileDialog />
+      <ImagePreview />
     </div>
   )
 }

@@ -164,18 +164,35 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
         <span className="pane-name">Terminal {terminalNumber || 1}</span>
         <span className="pane-tag">{session.tag}</span>
         <span className="pane-actions">
-          <button title="New terminal" onClick={(e) => actionClick(e, () => addSession(session.modelId))}>+</button>
-          <button title="Split columns" onClick={(e) => actionClick(e, () => setGrid(1, 2))}>
-            <span className="split-icon split-vertical" />
+          <button className="pane-act" title="New terminal" aria-label="New terminal" onClick={(e) => actionClick(e, () => addSession(session.modelId))}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+              <path d="M8 3.5v9M3.5 8h9" />
+            </svg>
           </button>
-          <button title="Split grid" onClick={(e) => actionClick(e, () => setGrid(2, 2))}>
-            <span className="split-icon split-grid" />
+          <button className="pane-act" title="Split columns" aria-label="Split columns" onClick={(e) => actionClick(e, () => setGrid(1, 2))}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true">
+              <rect x="2" y="3" width="12" height="10" rx="1.5" />
+              <line x1="8" y1="3" x2="8" y2="13" />
+            </svg>
           </button>
-          <button title="Close terminal" onClick={(e) => actionClick(e, () => removeSession(session.id))}>
-            <span className="trash-icon" />
+          <button className="pane-act" title="Split grid" aria-label="Split grid" onClick={(e) => actionClick(e, () => setGrid(2, 2))}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true">
+              <rect x="2" y="3" width="12" height="10" rx="1.5" />
+              <line x1="8" y1="3" x2="8" y2="13" />
+              <line x1="2" y1="8" x2="14" y2="8" />
+            </svg>
           </button>
-          <button title="More options" onClick={(e) => actionClick(e, () => window.api.ptyInput(session.id, '\r'))}>
-            <span className="more-icon" />
+          <button className="pane-act" title="Close terminal" aria-label="Close terminal" onClick={(e) => actionClick(e, () => removeSession(session.id))}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 4.5h10M6.5 4.5V3.6a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v.9M4.8 4.5l.55 8a1 1 0 0 0 1 .93h3.3a1 1 0 0 0 1-.93l.55-8M6.8 7v4M9.2 7v4" />
+            </svg>
+          </button>
+          <button className="pane-act" title="More options" aria-label="More options" onClick={(e) => actionClick(e, () => window.api.ptyInput(session.id, '\r'))}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+              <circle cx="8" cy="3.4" r="1.35" />
+              <circle cx="8" cy="8" r="1.35" />
+              <circle cx="8" cy="12.6" r="1.35" />
+            </svg>
           </button>
         </span>
       </div>

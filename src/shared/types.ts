@@ -55,6 +55,12 @@ export interface WorkspaceOpenResult {
   truncated?: boolean
 }
 
+export interface WorkspaceOpenPathPayload {
+  kind: WorkspaceKind
+  path: string
+  selectedFilePath?: string
+}
+
 export interface WorkspaceReadResult {
   file: WorkspaceFile
   content: string
@@ -64,6 +70,12 @@ export interface WorkspaceReadResult {
 export interface WorkspaceWritePayload {
   file: WorkspaceFile
   content: string
+}
+
+export interface WorkspaceImageResult {
+  file: WorkspaceFile
+  dataUrl: string
+  mime: string
 }
 
 export type RunStream = 'stdout' | 'stderr' | 'system'
