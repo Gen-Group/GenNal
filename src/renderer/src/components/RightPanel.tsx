@@ -84,6 +84,7 @@ export default function RightPanel(): JSX.Element {
   const togglePanelMaximized = useStore((s) => s.togglePanelMaximized)
   const togglePanel = useStore((s) => s.togglePanel)
   const openWorkspace = useStore((s) => s.openWorkspace)
+  const createWorkspaceFile = useStore((s) => s.createWorkspaceFile)
   const updateWorkspaceContent = useStore((s) => s.updateWorkspaceContent)
   const saveWorkspaceFile = useStore((s) => s.saveWorkspaceFile)
   const runOutput = useStore((s) => s.runOutput)
@@ -139,6 +140,11 @@ export default function RightPanel(): JSX.Element {
     }
     setCodeTab('OUTPUT')
     void runFile()
+  }
+
+  const handleNewFile = (): void => {
+    const name = window.prompt('New file path')
+    if (name?.trim()) void createWorkspaceFile(name.trim())
   }
 
   const startPanelResize = (event: ReactPointerEvent<HTMLButtonElement>): void => {
@@ -292,6 +298,7 @@ export default function RightPanel(): JSX.Element {
               <button disabled={!selectedFile || saveState === 'saving'} onClick={() => void handleSave()}>
                 {saveState === 'saving' ? 'Saving...' : saveState === 'saved' ? 'Saved' : 'Save'}
               </button>
+              <button disabled={workspace?.kind !== 'project'} onClick={handleNewFile}>New File</button>
               <button onClick={() => void openWorkspace('file')}>Upload File</button>
             </div>
             <div className="code-editor">

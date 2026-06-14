@@ -129,6 +129,8 @@ interface AppState {
   restoreWorkspace: () => Promise<void>
   clearWorkspace: () => void
   openWorkspaceFile: (file: WorkspaceFile) => Promise<void>
+  createWorkspaceFile: (relativePath: string) => Promise<void>
+  createWorkspaceFolder: (relativePath: string) => Promise<void>
   openImagePreview: (file: WorkspaceFile) => Promise<void>
   closeImagePreview: () => void
   updateWorkspaceContent: (content: string) => void
@@ -619,6 +621,48 @@ export const useStore = create<AppState>((set, get) => ({
       })
     } catch (err) {
       set({ workspaceError: err instanceof Error ? err.message : 'Unable to read file.' })
+    }
+  },
+
+  createWorkspaceFile: async (relativePath) => {
+    set({ workspaceError: null })
+    const workspace = get().workspace
+    if (!workspace || workspace.kind !== 'project') {
+      set({ workspaceError: 'Open a project before creating a file.' })
+      return
+    }
+
+    try {
+      const nextWorkspace = await window.api.createWorkspaceEntry({
+        workspacePath: workspace.path,
+        kind: 'file',
+        relativePath
+      })
+      saveWorkspaceRef(nextWorkspace)
+      set({ workspace: nextWorkspace, workspaceError: null, imagePreview: null })
+    } catch (err) {
+      set({ workspaceError: err instanceof Error ? err.message : 'Unable to create file.' })
+    }
+  },
+
+  createWorkspaceFolder: async (relativePath) => {
+    set({ workspaceError: null })
+    const workspace = get().workspace
+    if (!workspace || workspace.kind !== 'project') {
+      set({ workspaceError: 'Open a project before creating a folder.' })
+      return
+    }
+
+    try {
+      const nextWorkspace = await window.api.createWorkspaceEntry({
+        workspacePath: workspace.path,
+        kind: 'folder',
+        relativePath
+      })
+      saveWorkspaceRef(nextWorkspace)
+      set({ workspace: nextWorkspace, workspaceError: null, imagePreview: null })
+    } catch (err) {
+      set({ workspaceError: err instanceof Error ? err.message : 'Unable to create folder.' })
     }
   },
 

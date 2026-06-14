@@ -19,7 +19,7 @@ export default function StatusBar(): JSX.Element {
       <span className="sb-item">{active ? `Model: ${active.label}` : 'No model'}</span>
       <span className="sb-item">CPU: {stats.cpu}%</span>
       <span className="sb-item">Mem: {(stats.memUsedMB / 1024).toFixed(1)} GB</span>
-      <span className="sb-item">v1.0.0</span>
+      <span className="sb-item">v1.0.3</span>
     </footer>
   )
 }

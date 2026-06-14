@@ -8,6 +8,8 @@ export default function CommandPalette(): JSX.Element | null {
   const addSession = useStore((s) => s.addSession)
   const setGrid = useStore((s) => s.setGrid)
   const openWorkspace = useStore((s) => s.openWorkspace)
+  const createWorkspaceFile = useStore((s) => s.createWorkspaceFile)
+  const createWorkspaceFolder = useStore((s) => s.createWorkspaceFolder)
   const [q, setQ] = useState('')
 
   if (!open) return null
@@ -19,6 +21,25 @@ export default function CommandPalette(): JSX.Element | null {
       hint: m.tag,
       run: () => addSession(m.id)
     })),
+    {
+      key: 'new-file',
+      label: 'New File',
+      hint: 'workspace',
+      run: () => {
+        const name = window.prompt('New file path')
+        if (name?.trim()) void createWorkspaceFile(name.trim())
+      }
+    },
+    {
+      key: 'new-folder',
+      label: 'New Folder',
+      hint: 'workspace',
+      run: () => {
+        const name = window.prompt('New folder path')
+        if (name?.trim()) void createWorkspaceFolder(name.trim())
+      }
+    },
+    { key: 'new-window', label: 'New Window', hint: 'app', run: () => window.api.win.newWindow() },
     { key: 'open-file', label: 'Upload File', hint: 'workspace', run: () => void openWorkspace('file') },
     { key: 'open-project', label: 'Upload Project', hint: 'workspace', run: () => void openWorkspace('project') },
     { key: 'grid-2', label: 'Layout: Grid 2×2', hint: 'layout', run: () => setGrid(2, 2) },

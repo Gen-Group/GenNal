@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, protocol } from 'electron'
 import { promises as fs } from 'fs'
-import { basename, extname, join, normalize, relative } from 'path'
+import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'path'
 import { loadModels } from './model-registry'
 import {
   createSession,
@@ -15,6 +15,7 @@ import type {
   PtyCreatePayload,
   RunStartPayload,
   WorkspaceFile,
+  WorkspaceCreateEntryPayload,
   WorkspaceKind,
   WorkspaceOpenPathPayload,
   WorkspaceImageResult,
@@ -317,6 +318,24 @@ async function openWorkspacePath(payload: WorkspaceOpenPathPayload): Promise<Wor
   }
 }
 
+function pathInside(parent: string, child: string): boolean {
+  const rel = relative(parent, child)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function resolveWorkspaceEntry(root: string, entryPath: string): string {
+  const clean = entryPath.trim()
+  if (!clean) throw new Error('Enter a file or folder name.')
+  if (/^[a-zA-Z]:[\\/]/.test(clean) || clean.startsWith('/') || clean.startsWith('\\')) {
+    throw new Error('Use a relative path inside the workspace.')
+  }
+
+  const rootPath = resolve(root)
+  const target = resolve(rootPath, clean)
+  if (!pathInside(rootPath, target)) throw new Error('Path must stay inside the workspace.')
+  return target
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1480,
@@ -408,6 +427,34 @@ function registerIpc(): void {
     return readPreview({ ...payload.file, size: stat.size })
   })
 
+  ipcMain.handle('workspace:create-entry', async (_e, payload: WorkspaceCreateEntryPayload): Promise<WorkspaceOpenResult> => {
+    const rootStat = await fs.stat(payload.workspacePath)
+    if (!rootStat.isDirectory()) throw new Error('Open a project folder before creating files or folders.')
+
+    const target = resolveWorkspaceEntry(payload.workspacePath, payload.relativePath)
+    if (payload.kind === 'folder') {
+      await fs.mkdir(target, { recursive: true })
+      return openWorkspacePath({ kind: 'project', path: payload.workspacePath })
+    }
+
+    await fs.mkdir(dirname(target), { recursive: true })
+    try {
+      const handle = await fs.open(target, 'wx')
+      await handle.close()
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new Error('A file or folder already exists at that path.')
+      }
+      throw err
+    }
+
+    return openWorkspacePath({
+      kind: 'project',
+      path: payload.workspacePath,
+      selectedFilePath: target
+    })
+  })
+
   ipcMain.on('pty:create', (_e, payload: PtyCreatePayload) => {
     if (mainWindow) createSession(mainWindow, payload)
   })
@@ -424,12 +471,14 @@ function registerIpc(): void {
   })
   ipcMain.on('run:stop', () => stopRun())
 
-  ipcMain.on('win:minimize', () => mainWindow?.minimize())
-  ipcMain.on('win:maximize', () => {
-    if (!mainWindow) return
-    mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize()
+  ipcMain.on('win:minimize', (event) => BrowserWindow.fromWebContents(event.sender)?.minimize())
+  ipcMain.on('win:maximize', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (!window) return
+    window.isMaximized() ? window.unmaximize() : window.maximize()
   })
-  ipcMain.on('win:close', () => mainWindow?.close())
+  ipcMain.on('win:new', () => createWindow())
+  ipcMain.on('win:close', (event) => BrowserWindow.fromWebContents(event.sender)?.close())
 }
 
 app.whenReady().then(() => {

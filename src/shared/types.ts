@@ -72,6 +72,12 @@ export interface WorkspaceWritePayload {
   content: string
 }
 
+export interface WorkspaceCreateEntryPayload {
+  workspacePath: string
+  kind: 'file' | 'folder'
+  relativePath: string
+}
+
 export interface WorkspaceImageResult {
   file: WorkspaceFile
   dataUrl: string

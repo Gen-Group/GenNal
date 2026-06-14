@@ -340,6 +340,10 @@ select {
   background: var(--ov2);
   color: var(--tx);
 }
+.workspace-tool.active {
+  background: var(--ov2);
+  color: var(--tx);
+}
 .workspace-tool:active {
   transform: translateY(1px);
 }
@@ -770,7 +774,8 @@ select {
   width: 12px;
   height: 12px;
 }
-.folder-menu {
+.folder-menu,
+.workspace-add-menu {
   position: fixed;
   z-index: 1000;
   display: grid;
@@ -782,7 +787,11 @@ select {
   border-radius: 8px;
   box-shadow: 0 18px 45px -22px #000;
 }
-.folder-menu button {
+.workspace-add-menu {
+  width: 168px;
+}
+.folder-menu button,
+.workspace-add-menu button {
   border: none;
   background: transparent;
   color: var(--tx);
@@ -791,7 +800,8 @@ select {
   padding: 7px 8px;
   font-size: 11.5px;
 }
-.folder-menu button:hover {
+.folder-menu button:hover,
+.workspace-add-menu button:hover {
   background: var(--ov2);
 }
 .file-item {

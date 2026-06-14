@@ -8,6 +8,7 @@ import type {
   RunOutput,
   RunStartPayload,
   SystemStats,
+  WorkspaceCreateEntryPayload,
   WorkspaceFile,
   WorkspaceKind,
   WorkspaceImageResult,
@@ -30,6 +31,8 @@ const api = {
     ipcRenderer.invoke('workspace:read-image', file),
   writeWorkspaceFile: (payload: WorkspaceWritePayload): Promise<WorkspaceReadResult> =>
     ipcRenderer.invoke('workspace:write-file', payload),
+  createWorkspaceEntry: (payload: WorkspaceCreateEntryPayload): Promise<WorkspaceOpenResult> =>
+    ipcRenderer.invoke('workspace:create-entry', payload),
 
   ptyCreate: (payload: PtyCreatePayload): void => ipcRenderer.send('pty:create', payload),
   ptyInput: (id: string, data: string): void => ipcRenderer.send('pty:input', { id, data }),
@@ -69,6 +72,7 @@ const api = {
   win: {
     minimize: (): void => ipcRenderer.send('win:minimize'),
     maximize: (): void => ipcRenderer.send('win:maximize'),
+    newWindow: (): void => ipcRenderer.send('win:new'),
     close: (): void => ipcRenderer.send('win:close')
   }
 }

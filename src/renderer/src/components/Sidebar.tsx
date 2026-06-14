@@ -142,6 +142,7 @@ function Spark({ color }: { color: string }): JSX.Element {
 export default function Sidebar(): JSX.Element {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set())
   const [folderMenu, setFolderMenu] = useState<{ folder: string; x: number; y: number } | null>(null)
+  const [workspaceMenu, setWorkspaceMenu] = useState<{ x: number; y: number } | null>(null)
   const sessions = useStore((s) => s.sessions)
   const activeId = useStore((s) => s.activeId)
   const setActive = useStore((s) => s.setActive)
@@ -155,6 +156,8 @@ export default function Sidebar(): JSX.Element {
   const workspaceError = useStore((s) => s.workspaceError)
   const openWorkspace = useStore((s) => s.openWorkspace)
   const openWorkspaceFile = useStore((s) => s.openWorkspaceFile)
+  const createWorkspaceFile = useStore((s) => s.createWorkspaceFile)
+  const createWorkspaceFolder = useStore((s) => s.createWorkspaceFolder)
   const openImagePreview = useStore((s) => s.openImagePreview)
   const running = sessions.filter((s) => s.status === 'running').length
   const fileTree = workspace ? buildFileTree(workspace.files.slice(0, 120)) : undefined
@@ -170,15 +173,18 @@ export default function Sidebar(): JSX.Element {
   const hasRemote = Boolean(git?.remoteUrl)
 
   useEffect(() => {
-    if (!folderMenu) return
-    const close = (): void => setFolderMenu(null)
-    window.addEventListener('click', close)
-    window.addEventListener('keydown', close)
-    return () => {
-      window.removeEventListener('click', close)
-      window.removeEventListener('keydown', close)
+    if (!folderMenu && !workspaceMenu) return
+    const closeAll = (): void => {
+      setFolderMenu(null)
+      setWorkspaceMenu(null)
     }
-  }, [folderMenu])
+    window.addEventListener('click', closeAll)
+    window.addEventListener('keydown', closeAll)
+    return () => {
+      window.removeEventListener('click', closeAll)
+      window.removeEventListener('keydown', closeAll)
+    }
+  }, [folderMenu, workspaceMenu])
 
   const toggleFolder = (folder: string): void => {
     setCollapsedFolders((current) => {
@@ -191,6 +197,22 @@ export default function Sidebar(): JSX.Element {
 
   const openFolderMenu = (folder: string, x: number, y: number): void => {
     setFolderMenu({ folder, x, y })
+  }
+
+  const nestedPath = (folder: string | undefined, name: string): string => {
+    const cleanName = name.trim().replace(/^[/\\]+/, '')
+    if (!folder || folder === 'Root') return cleanName
+    return `${folder.replace(/\\/g, '/')}/${cleanName}`
+  }
+
+  const promptNewFile = (folder?: string): void => {
+    const name = window.prompt('New file path')
+    if (name?.trim()) void createWorkspaceFile(nestedPath(folder, name))
+  }
+
+  const promptNewFolder = (folder?: string): void => {
+    const name = window.prompt('New folder path')
+    if (name?.trim()) void createWorkspaceFolder(nestedPath(folder, name))
   }
 
   const openBranch = (): void => {
@@ -279,7 +301,18 @@ export default function Sidebar(): JSX.Element {
                 <path d="M8 11.5v-3M6.5 10h3" />
               </svg>
             </button>
-            <button className="workspace-tool" title="Open project" aria-label="Open project" onClick={() => void openWorkspace('project')}>
+            <button
+              className={`workspace-tool ${workspaceMenu ? 'active' : ''}`}
+              title="Add workspace item"
+              aria-label="Add workspace item"
+              aria-expanded={Boolean(workspaceMenu)}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                const rect = event.currentTarget.getBoundingClientRect()
+                setWorkspaceMenu({ x: rect.right - 168, y: rect.bottom + 6 })
+              }}
+            >
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
                 <path d="M8 3v10M3 8h10" />
               </svg>
@@ -360,10 +393,46 @@ export default function Sidebar(): JSX.Element {
             <span className="workspace-open-arrow">›</span>
           </div>
         </div>
-        <div className="workspace-actions">
-          <button className="workspace-action" onClick={() => void openWorkspace('file')}>Upload File</button>
-          <button className="workspace-action" onClick={() => void openWorkspace('project')}>Upload Project</button>
-        </div>
+        {workspaceMenu && (
+          <div
+            className="workspace-add-menu"
+            style={{ left: workspaceMenu.x, top: workspaceMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                promptNewFile()
+                setWorkspaceMenu(null)
+              }}
+            >
+              New File
+            </button>
+            <button
+              onClick={() => {
+                promptNewFolder()
+                setWorkspaceMenu(null)
+              }}
+            >
+              New Folder
+            </button>
+            <button
+              onClick={() => {
+                void openWorkspace('file')
+                setWorkspaceMenu(null)
+              }}
+            >
+              Upload File
+            </button>
+            <button
+              onClick={() => {
+                void openWorkspace('project')
+                setWorkspaceMenu(null)
+              }}
+            >
+              Upload Project
+            </button>
+          </div>
+        )}
         {workspaceError && <div className="side-error">{workspaceError}</div>}
         {workspace && (
           <div className="file-list">
@@ -380,6 +449,22 @@ export default function Sidebar(): JSX.Element {
             style={{ left: folderMenu.x, top: folderMenu.y }}
             onClick={(event) => event.stopPropagation()}
           >
+            <button
+              onClick={() => {
+                promptNewFile(menuFolder.path)
+                setFolderMenu(null)
+              }}
+            >
+              New file
+            </button>
+            <button
+              onClick={() => {
+                promptNewFolder(menuFolder.path)
+                setFolderMenu(null)
+              }}
+            >
+              New folder
+            </button>
             <button
               onClick={() => {
                 const firstFile = firstFileInFolder(menuFolder)
@@ -430,6 +515,9 @@ export default function Sidebar(): JSX.Element {
         <div className="side-head"><span>QUICK ACTIONS</span></div>
         <button className="qa" onClick={() => togglePalette(true)}>
           Command Palette <kbd>Ctrl K</kbd>
+        </button>
+        <button className="qa" onClick={() => window.api.win.newWindow()}>
+          New Window <kbd>Ctrl N</kbd>
         </button>
         <button className="qa soon" disabled title="Mobile app — coming soon">
           Mobile <span className="soon-pill">Coming soon</span>

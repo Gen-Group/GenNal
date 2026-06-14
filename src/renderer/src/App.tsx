@@ -56,6 +56,10 @@ export default function App(): JSX.Element {
         e.preventDefault()
         togglePalette()
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        window.api.win.newWindow()
+      }
       if (e.key === 'Escape') togglePalette(false)
     }
     window.addEventListener('keydown', onKey)
