@@ -3,7 +3,19 @@ import { homedir } from 'os'
 import type { BrowserWindow } from 'electron'
 import type { PtyCreatePayload } from '../shared/types'
 
-const SHELL = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || 'bash'
+const isWindows = process.platform === 'win32'
+const isMac = process.platform === 'darwin'
+
+const SHELL = isWindows
+  ? 'powershell.exe'
+  : process.env.SHELL || (isMac ? '/bin/zsh' : '/bin/bash')
+
+// Spawn the shell as a login + interactive shell on macOS/Linux so it sources
+// the user's profile (.zprofile/.zshrc, .bash_profile/.bashrc). A GUI Electron
+// app launched from Finder/Dock inherits only a minimal PATH, so without this
+// the user's CLIs (claude, codex, gemini installed via npm/brew/nvm) are not on
+// PATH and never launch, and the shell shows no themed prompt.
+const SHELL_ARGS = isWindows ? [] : ['-l', '-i']
 
 interface Session {
   proc: pty.IPty
@@ -19,13 +31,13 @@ export function createSession(win: BrowserWindow, payload: PtyCreatePayload): vo
 
   let proc: pty.IPty
   try {
-    proc = pty.spawn(SHELL, [], {
-      name: 'xterm-color',
+    proc = pty.spawn(SHELL, SHELL_ARGS, {
+      name: 'xterm-256color',
       cols: 80,
       rows: 24,
       cwd: cwd || process.cwd() || homedir(),
       env,
-      useConptyDll: process.platform === 'win32'
+      useConptyDll: isWindows
     })
   } catch (err) {
     win.webContents.send('pty:exit', { id, code: -1 })

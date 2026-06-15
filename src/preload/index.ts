@@ -19,7 +19,16 @@ import type {
   WorkspaceWritePayload
 } from '../shared/types'
 
+const shellName = ((): string => {
+  if (process.platform === 'win32') return 'PowerShell'
+  const shell = process.env.SHELL?.split('/').pop()
+  return shell || (process.platform === 'darwin' ? 'zsh' : 'bash')
+})()
+
 const api = {
+  platform: process.platform,
+  shellName,
+
   listModels: (): Promise<ModelDef[]> => ipcRenderer.invoke('models:list'),
 
   openWorkspace: (kind: WorkspaceKind): Promise<WorkspaceOpenResult | null> =>
