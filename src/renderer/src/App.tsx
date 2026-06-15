@@ -9,6 +9,7 @@ import StatusBar from './components/StatusBar'
 import CommandPalette from './components/CommandPalette'
 import SettingsPanel from './components/SettingsPanel'
 import ProfileDialog from './components/ProfileDialog'
+import AddModelDialog from './components/AddModelDialog'
 import ImagePreview from './components/ImagePreview'
 
 export default function App(): JSX.Element {
@@ -85,6 +86,7 @@ export default function App(): JSX.Element {
       <CommandPalette />
       <SettingsPanel />
       <ProfileDialog />
+      <AddModelDialog />
       <ImagePreview />
     </div>
   )

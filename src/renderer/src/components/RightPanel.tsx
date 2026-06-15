@@ -7,10 +7,11 @@ import {
   type PointerEvent as ReactPointerEvent,
   type UIEvent
 } from 'react'
-import { useStore } from '../store'
+import { useStore, type CodePanelTab } from '../store'
 import PanelTerminal from './PanelTerminal'
+import ChatPanel from './ChatPanel'
 
-const CODE_TABS = ['CODE', 'OUTPUT', 'TERMINAL', 'PROBLEMS']
+const CODE_TABS: CodePanelTab[] = ['CODE', 'CHAT', 'OUTPUT', 'TERMINAL', 'PROBLEMS']
 
 const SAMPLE = `import 'package:flutter/material.dart';
 
@@ -71,10 +72,12 @@ function highlightLine(line: string): JSX.Element[] {
 }
 
 export default function RightPanel(): JSX.Element {
-  const [codeTab, setCodeTab] = useState('CODE')
   const [terminalMounted, setTerminalMounted] = useState(false)
+  const [chatMounted, setChatMounted] = useState(false)
   const [scroll, setScroll] = useState({ left: 0, top: 0 })
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const codeTab = useStore((s) => s.codePanelTab)
+  const setCodeTab = useStore((s) => s.setCodePanelTab)
   const workspace = useStore((s) => s.workspace)
   const workspaceError = useStore((s) => s.workspaceError)
   const panelSide = useStore((s) => s.panelSide)
@@ -193,7 +196,16 @@ export default function RightPanel(): JSX.Element {
   // it mounted (hidden) so the session survives switching between tabs.
   useEffect(() => {
     if (codeTab === 'TERMINAL') setTerminalMounted(true)
+    // Keep the chat panel mounted once opened so its messages, draft input and
+    // any in-flight reply survive switching to OUTPUT or other tabs.
+    if (codeTab === 'CHAT') setChatMounted(true)
   }, [codeTab])
+
+  useEffect(() => {
+    if (panelMaximized && codeTab !== 'CODE' && codeTab !== 'CHAT') {
+      setCodeTab('CODE')
+    }
+  }, [codeTab, panelMaximized, setCodeTab])
 
   // Keep the console pinned to the newest output.
   useEffect(() => {
@@ -229,7 +241,9 @@ export default function RightPanel(): JSX.Element {
     return () => window.clearTimeout(timeout)
   }, [code, saveWorkspaceFile, selectedFile, workspace?.kind])
 
+  const visibleTabs = panelMaximized ? CODE_TABS.filter((tab) => tab === 'CODE' || tab === 'CHAT') : CODE_TABS
   const moveToLeft = panelSide === 'right'
+  const showPanelMove = codeTab === 'CODE' || codeTab === 'TERMINAL'
 
   return (
     <aside className="rightpanel">
@@ -243,27 +257,35 @@ export default function RightPanel(): JSX.Element {
       <div className="rp-code">
         <div className="rp-tabs">
           <div className="rp-tabgroup" role="tablist">
-            {CODE_TABS.map((t) => (
+            {visibleTabs.map((t) => (
               <button
                 key={t}
                 role="tab"
                 aria-selected={codeTab === t}
                 className={codeTab === t ? 'active' : ''}
                 onClick={() => setCodeTab(t)}
+                onContextMenu={(event) => {
+                  if (t !== 'CODE' && t !== 'CHAT') return
+                  event.preventDefault()
+                  setCodeTab(t)
+                  togglePanelMaximized(true)
+                }}
               >
                 {t}
               </button>
             ))}
           </div>
           <div className="rp-actions">
-            <button
-              className="panel-move-btn"
-              title={moveToLeft ? 'Move code panel to the left' : 'Move code panel to the right'}
-              onClick={() => setPanelSide(moveToLeft ? 'left' : 'right')}
-            >
-              <span className="mv-arrow" aria-hidden="true">{moveToLeft ? '‹' : '›'}</span>
-              <span>Move {moveToLeft ? 'left' : 'right'}</span>
-            </button>
+            {showPanelMove && (
+              <button
+                className="panel-move-btn"
+                title={moveToLeft ? 'Move code panel to the left' : 'Move code panel to the right'}
+                onClick={() => setPanelSide(moveToLeft ? 'left' : 'right')}
+              >
+                <span className="mv-arrow" aria-hidden="true">{moveToLeft ? '‹' : '›'}</span>
+                <span>Move {moveToLeft ? 'left' : 'right'}</span>
+              </button>
+            )}
             <button
               className={`rp-icon-btn ${panelMaximized ? 'active' : ''}`}
               title={panelMaximized ? 'Exit full screen' : 'Full screen code panel'}
@@ -357,6 +379,8 @@ export default function RightPanel(): JSX.Element {
             </div>
           </>
         )}
+
+        {chatMounted && <ChatPanel active={codeTab === 'CHAT'} />}
 
         {codeTab === 'OUTPUT' && (
           <>

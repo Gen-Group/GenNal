@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AttachmentSaveResult,
+  ChatData,
+  ChatExit,
+  ChatSendPayload,
   CliUsage,
   ModelDef,
   PtyCreatePayload,
@@ -32,6 +35,8 @@ const api = {
   isMac: process.platform === 'darwin',
 
   listModels: (): Promise<ModelDef[]> => ipcRenderer.invoke('models:list'),
+  saveModels: (models: ModelDef[]): Promise<ModelDef[]> =>
+    ipcRenderer.invoke('models:save', models),
 
   getUsage: (modelId: string): Promise<CliUsage> => ipcRenderer.invoke('usage:get', modelId),
 
@@ -49,6 +54,8 @@ const api = {
     ipcRenderer.invoke('workspace:create-entry', payload),
   saveClipboardImage: (): Promise<AttachmentSaveResult | null> =>
     ipcRenderer.invoke('attachments:save-clipboard-image'),
+  pickImages: (): Promise<AttachmentSaveResult[]> => ipcRenderer.invoke('attachments:pick-images'),
+  writeClipboardText: (text: string): void => ipcRenderer.send('clipboard:write-text', text),
 
   ptyCreate: (payload: PtyCreatePayload): void => ipcRenderer.send('pty:create', payload),
   ptyInput: (id: string, data: string): void => ipcRenderer.send('pty:input', { id, data }),
@@ -67,6 +74,19 @@ const api = {
     const handler = (_e: unknown, e: RunExit): void => cb(e)
     ipcRenderer.on('run:exit', handler)
     return () => ipcRenderer.removeListener('run:exit', handler)
+  },
+
+  chatSend: (payload: ChatSendPayload): void => ipcRenderer.send('chat:send', payload),
+  chatCancel: (id: string): void => ipcRenderer.send('chat:cancel', { id }),
+  onChatData: (cb: (d: ChatData) => void): (() => void) => {
+    const handler = (_e: unknown, d: ChatData): void => cb(d)
+    ipcRenderer.on('chat:data', handler)
+    return () => ipcRenderer.removeListener('chat:data', handler)
+  },
+  onChatExit: (cb: (e: ChatExit) => void): (() => void) => {
+    const handler = (_e: unknown, e: ChatExit): void => cb(e)
+    ipcRenderer.on('chat:exit', handler)
+    return () => ipcRenderer.removeListener('chat:exit', handler)
   },
 
   onPtyData: (cb: (d: PtyData) => void): (() => void) => {

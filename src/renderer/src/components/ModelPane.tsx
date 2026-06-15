@@ -114,6 +114,26 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
     fit.fit()
     term.focus()
 
+    const copySelection = (): boolean => {
+      const selection = term.getSelection()
+      if (!selection) return false
+      window.api.writeClipboardText(selection)
+      term.clearSelection()
+      return true
+    }
+
+    // xterm has no built-in copy: wire Ctrl/Cmd+C (when text is selected) and
+    // Ctrl/Cmd+Shift+C to copy the selection instead of sending it to the pty.
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.type !== 'keydown') return true
+      const mod = window.api.isMac ? event.metaKey : event.ctrlKey
+      const isC = event.key === 'c' || event.key === 'C'
+      if (mod && isC && (event.shiftKey || term.hasSelection())) {
+        if (copySelection()) return false
+      }
+      return true
+    })
+
     const { id, command, cwd } = session
     window.api.ptyCreate({ id, command, cwd })
     setStatus(id, 'running')
@@ -195,11 +215,31 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
     terminalRef.current?.focus()
   }
 
-  const onPanePaste = async (e: ReactClipboardEvent<HTMLDivElement>): Promise<void> => {
-    if (!hasImageItem(e.clipboardData.items)) return
-    e.preventDefault()
-    e.stopPropagation()
+  const onPanePaste = (e: ReactClipboardEvent<HTMLDivElement>): void => {
+    const text = e.clipboardData.getData('text/plain')
+    if (text) {
+      e.preventDefault()
+      e.stopPropagation()
+      setActive(session.id)
+      terminalRef.current?.paste(text)
+      terminalRef.current?.focus()
+      return
+    }
 
+    // When Chromium flags the clipboard image as a DOM file item, cancel the
+    // default paste so an empty/garbled paste doesn't reach the shell.
+    if (hasImageItem(e.clipboardData.items)) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    // Always consult the OS clipboard via main: on Windows a copied screenshot
+    // (PrintScreen / Snipping Tool) is a raw bitmap that the paste event often
+    // doesn't expose as a file item. saveClipboardImage() returns null when
+    // there's no image, so plain-text pastes fall through to the terminal.
+    void attachClipboardImage()
+  }
+
+  const attachClipboardImage = async (): Promise<void> => {
     try {
       const attachment = await window.api.saveClipboardImage()
       if (!attachment) return
@@ -236,6 +276,8 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
   const onPaneKeyDown = (e: ReactKeyboardEvent): void => {
     const target = e.target as HTMLElement
     if (target.closest('.xterm')) return
+    const mod = window.api.isMac ? e.metaKey : e.ctrlKey
+    if (mod && (e.key === 'v' || e.key === 'V')) return
 
     const data = keyToPtyData(e)
     if (!data) return

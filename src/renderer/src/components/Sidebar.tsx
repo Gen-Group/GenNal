@@ -165,6 +165,9 @@ export default function Sidebar(): JSX.Element {
   const [systemOverviewHidden, setSystemOverviewHidden] = useState<boolean>(() => {
     return window.localStorage.getItem('gennal:system-overview-hidden') === 'true'
   })
+  const [filesHidden, setFilesHidden] = useState<boolean>(() => {
+    return window.localStorage.getItem('gennal:files-hidden') === 'true'
+  })
   const [folderMenu, setFolderMenu] = useState<{ folder: string; x: number; y: number } | null>(null)
   const [fileMenu, setFileMenu] = useState<{ file: WorkspaceFile; x: number; y: number } | null>(null)
   const [workspaceMenu, setWorkspaceMenu] = useState<{ x: number; y: number } | null>(null)
@@ -224,6 +227,10 @@ export default function Sidebar(): JSX.Element {
   useEffect(() => {
     window.localStorage.setItem('gennal:system-overview-hidden', String(systemOverviewHidden))
   }, [systemOverviewHidden])
+
+  useEffect(() => {
+    window.localStorage.setItem('gennal:files-hidden', String(filesHidden))
+  }, [filesHidden])
 
   const toggleFolder = (folder: string): void => {
     setCollapsedFolders((current) => {
@@ -336,6 +343,26 @@ export default function Sidebar(): JSX.Element {
           <span>Workspaces</span>
           <div className="workspace-tools">
             <button
+              className={`workspace-tool ${filesHidden ? 'active' : ''}`}
+              title={filesHidden ? 'Show files' : 'Hide files'}
+              aria-label={filesHidden ? 'Show files' : 'Hide files'}
+              aria-pressed={filesHidden}
+              onClick={() => setFilesHidden((hidden) => !hidden)}
+            >
+              {filesHidden ? (
+                <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4z" />
+                  <circle cx="8" cy="8" r="1.8" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M2 8s2.2-4 6-4c1.2 0 2.2.4 3.1 1" />
+                  <path d="M14 8s-.8 1.5-2.2 2.6M9.8 11.7A6.8 6.8 0 0 1 8 12c-3.8 0-6-4-6-4s.7-1.3 2-2.4" />
+                  <path d="M3 3l10 10" />
+                </svg>
+              )}
+            </button>
+            <button
               className={`workspace-tool ${filterMenu ? 'active' : ''}`}
               title="Workspace filters"
               aria-label="Workspace filters"
@@ -400,11 +427,13 @@ export default function Sidebar(): JSX.Element {
             ))}
           </div>
         )}
-        <div className="workspace-filter">
-          <span className="list-icon" />
-          <span>{activeFilterLabel}</span>
-          <span className="workspace-filter-count">{filteredFiles.length}</span>
-        </div>
+        {!filesHidden && (
+          <div className="workspace-filter">
+            <span className="list-icon" />
+            <span>{activeFilterLabel}</span>
+            <span className="workspace-filter-count">{filteredFiles.length}</span>
+          </div>
+        )}
         <div className={`workspace-stack ${workspace ? 'active' : ''}`}>
           {isRepo ? (
             <button
@@ -521,18 +550,25 @@ export default function Sidebar(): JSX.Element {
             </button>
           </div>
         )}
-        {workspaceError && <div className="side-error">{workspaceError}</div>}
-        {workspace && (
-          <div className="file-list">
-            {fileTree?.files.map(renderFile)}
-            {fileTree?.folders.map((folder) => renderFolder(folder))}
-            {filteredFiles.length === 0 && (
-              <div className="file-more">No files match this filter</div>
-            )}
-            {filteredFiles.length > 120 && (
-              <div className="file-more">+{filteredFiles.length - 120} more files</div>
-            )}
-          </div>
+        {workspaceError && !filesHidden && <div className="side-error">{workspaceError}</div>}
+        {filesHidden ? (
+          <button className="ov-hidden-row files-hidden-row" onClick={() => setFilesHidden(false)}>
+            <span>Files hidden</span>
+            <span>Show</span>
+          </button>
+        ) : (
+          workspace && (
+            <div className="file-list">
+              {fileTree?.files.map(renderFile)}
+              {fileTree?.folders.map((folder) => renderFolder(folder))}
+              {filteredFiles.length === 0 && (
+                <div className="file-more">No files match this filter</div>
+              )}
+              {filteredFiles.length > 120 && (
+                <div className="file-more">+{filteredFiles.length - 120} more files</div>
+              )}
+            </div>
+          )
         )}
         {fileMenu && (
           <div

@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { join } from 'path'
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync } from 'fs'
 import type { ModelDef } from '../shared/types'
 
 const DEFAULT_MODELS: ModelDef[] = [
@@ -25,4 +25,15 @@ export function loadModels(): ModelDef[] {
     /* fall back to defaults on any parse/read error */
   }
   return DEFAULT_MODELS
+}
+
+/**
+ * Persists the full model list to the userData `models.json` override and
+ * returns it. The renderer sends the complete list (defaults + user additions)
+ * so a single file is the source of truth on the next launch.
+ */
+export function saveModels(models: ModelDef[]): ModelDef[] {
+  const override = join(app.getPath('userData'), 'models.json')
+  writeFileSync(override, JSON.stringify(models, null, 2), 'utf-8')
+  return models
 }

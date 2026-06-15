@@ -24,6 +24,7 @@ export interface Session {
 
 export type LayoutMode = 'grid' | 'tabs' | 'stack' | 'float'
 export type PanelSide = 'left' | 'right'
+export type CodePanelTab = 'CODE' | 'CHAT' | 'OUTPUT' | 'TERMINAL' | 'PROBLEMS'
 export type ThemeName =
   | 'dark'
   | 'light'
@@ -101,6 +102,25 @@ export interface ImagePreview {
   size: number
 }
 
+export interface ApplyCodeResult {
+  ok: boolean
+  message: string
+}
+
+export interface ChatHistoryMessage {
+  role: 'user' | 'assistant'
+  text: string
+  error?: boolean
+}
+
+export interface ChatHistoryEntry {
+  id: string
+  modelId: string
+  modelLabel: string
+  createdAt: string
+  messages: ChatHistoryMessage[]
+}
+
 interface AppState {
   models: ModelDef[]
   sessions: Session[]
@@ -112,10 +132,12 @@ interface AppState {
   panelWidth: number
   panelOpen: boolean
   panelMaximized: boolean
+  codePanelTab: CodePanelTab
   sidebarOpen: boolean
   stats: SystemStats
   paletteOpen: boolean
   settingsOpen: boolean
+  addModelOpen: boolean
   theme: ThemeName
   profile: Profile
   generalSettings: GeneralSettings
@@ -129,8 +151,12 @@ interface AppState {
   imagePreview: ImagePreview | null
   runOutput: RunOutput[]
   running: boolean
+  chatHistory: ChatHistoryEntry[]
 
   setModels: (m: ModelDef[]) => void
+  addModel: (model: Omit<ModelDef, 'id' | 'custom'>) => Promise<void>
+  removeModel: (id: string) => Promise<void>
+  toggleAddModel: (v?: boolean) => void
   addSession: (modelId: string) => void
   removeSession: (id: string) => void
   setStatus: (id: string, status: SessionStatus) => void
@@ -141,6 +167,7 @@ interface AppState {
   setPanelWidth: (width: number) => void
   togglePanel: (v?: boolean) => void
   togglePanelMaximized: (v?: boolean) => void
+  setCodePanelTab: (tab: CodePanelTab) => void
   toggleSidebar: (v?: boolean) => void
   setStats: (s: SystemStats) => void
   togglePalette: (v?: boolean) => void
@@ -153,6 +180,8 @@ interface AppState {
   setPrivacySettings: (settings: Partial<PrivacySettings>) => void
   setEditorSettings: (settings: Partial<EditorSettings>) => void
   clearLocalData: () => void
+  addChatHistoryEntry: (entry: Omit<ChatHistoryEntry, 'id' | 'createdAt'>) => void
+  clearChatHistory: () => void
   toggleProfileSetup: (v?: boolean) => void
   openWorkspace: (kind: WorkspaceKind) => Promise<void>
   restoreWorkspace: () => Promise<void>
@@ -169,6 +198,7 @@ interface AppState {
   appendRunOutput: (output: RunOutput) => void
   finishRun: (exit: RunExit) => void
   clearRunOutput: () => void
+  applyCode: (code: string, suggestedName?: string) => Promise<ApplyCodeResult>
 }
 
 function uid(): string {
@@ -310,6 +340,7 @@ const DEFAULT_PRIVACY_SETTINGS: PrivacySettings = {
   clearOnExit: false
 }
 const EDITOR_STORAGE = 'gennal.editorSettings'
+const CHAT_HISTORY_STORAGE = 'gennal.chatHistory'
 const EDITOR_TAB_SIZES = [2, 4, 8]
 const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   fontSize: 13,
@@ -451,6 +482,50 @@ function loadEditorSettings(): EditorSettings {
   }
 }
 
+function loadChatHistory(): ChatHistoryEntry[] {
+  try {
+    const raw = window.localStorage.getItem(CHAT_HISTORY_STORAGE)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as Partial<ChatHistoryEntry>[]
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((entry) => typeof entry?.id === 'string' && Array.isArray(entry.messages))
+      .map((entry) => ({
+        id: entry.id as string,
+        modelId: typeof entry.modelId === 'string' ? entry.modelId : '',
+        modelLabel: typeof entry.modelLabel === 'string' ? entry.modelLabel : 'AI',
+        createdAt: typeof entry.createdAt === 'string' ? entry.createdAt : new Date().toISOString(),
+        messages: (entry.messages ?? [])
+          .filter((message) => message?.role === 'user' || message?.role === 'assistant')
+          .map((message) => ({
+            role: message.role as 'user' | 'assistant',
+            text: typeof message.text === 'string' ? message.text : '',
+            error: Boolean(message.error)
+          }))
+          .filter((message) => message.text.trim().length > 0)
+      }))
+      .filter((entry) => entry.messages.length > 0)
+  } catch {
+    return []
+  }
+}
+
+function saveChatHistory(history: ChatHistoryEntry[]): void {
+  try {
+    window.localStorage.setItem(CHAT_HISTORY_STORAGE, JSON.stringify(history.slice(0, 50)))
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+function clearChatHistoryStorage(): void {
+  try {
+    window.localStorage.removeItem(CHAT_HISTORY_STORAGE)
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
 const TERMINAL_ACCENTS = ['#22c55e', '#2f8cff', '#7c3aed', '#f97316']
 
 function createSession(model: ModelDef, index: number, cwd?: string): Session {
@@ -477,10 +552,12 @@ export const useStore = create<AppState>((set, get) => ({
   panelWidth: initialPanelWidth(),
   panelOpen: initialPanelOpen(),
   panelMaximized: initialPanelMaximized(),
+  codePanelTab: 'CODE',
   sidebarOpen: initialSidebarOpen(),
   stats: { cpu: 0, memUsedMB: 0, memTotalMB: 0 },
   paletteOpen: false,
   settingsOpen: false,
+  addModelOpen: false,
   theme: INITIAL_THEME,
   profile: loadProfile(),
   generalSettings: loadGeneralSettings(),
@@ -494,8 +571,49 @@ export const useStore = create<AppState>((set, get) => ({
   imagePreview: null,
   runOutput: [],
   running: false,
+  chatHistory: loadChatHistory(),
 
   setModels: (models) => set({ models }),
+
+  addModel: async (model) => {
+    const existing = get().models
+    const base =
+      model.label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '') || 'model'
+    let id = base
+    let n = 2
+    while (existing.some((m) => m.id === id)) id = `${base}-${n++}`
+
+    const next: ModelDef = {
+      id,
+      label: model.label.trim(),
+      tag: model.tag.trim() || base,
+      command: model.command.trim(),
+      accent: model.accent || '#A78BFA',
+      custom: true
+    }
+    const models = [...existing, next]
+    set({ models, addModelOpen: false })
+    try {
+      await window.api.saveModels(models)
+    } catch {
+      /* keep the in-memory addition even if the disk write fails */
+    }
+  },
+
+  removeModel: async (id) => {
+    const models = get().models.filter((m) => m.id !== id)
+    set({ models })
+    try {
+      await window.api.saveModels(models)
+    } catch {
+      /* ignore disk write errors */
+    }
+  },
+
+  toggleAddModel: (v) => set((s) => ({ addModelOpen: v ?? !s.addModelOpen })),
 
   addSession: (modelId) => {
     const model = get().models.find((m) => m.id === modelId)
@@ -565,6 +683,7 @@ export const useStore = create<AppState>((set, get) => ({
       }
       return { panelMaximized, panelOpen }
     }),
+  setCodePanelTab: (codePanelTab) => set({ codePanelTab }),
   toggleSidebar: (v) =>
     set((s) => {
       const sidebarOpen = v ?? !s.sidebarOpen
@@ -659,11 +778,15 @@ export const useStore = create<AppState>((set, get) => ({
       try {
         window.localStorage.setItem(PRIVACY_STORAGE, JSON.stringify(next))
         // Turning off "remember" options should also drop anything already stored.
+        if (settings.rememberHistory === false) clearChatHistoryStorage()
         if (settings.rememberWorkspace === false) clearWorkspaceRef()
       } catch {
         /* ignore storage errors */
       }
-      return { privacySettings: next }
+      return {
+        privacySettings: next,
+        chatHistory: settings.rememberHistory === false ? [] : s.chatHistory
+      }
     })
   },
 
@@ -713,7 +836,28 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {
       /* ignore storage errors */
     }
-    set({ workspace: null, workspaceError: null, imagePreview: null, runOutput: [] })
+    set({ workspace: null, workspaceError: null, imagePreview: null, runOutput: [], chatHistory: [] })
+  },
+
+  addChatHistoryEntry: (entry) => {
+    set((s) => {
+      if (!s.privacySettings.rememberHistory) return s
+      const next: ChatHistoryEntry[] = [
+        {
+          ...entry,
+          id: 'chat_' + Math.random().toString(36).slice(2, 10),
+          createdAt: new Date().toISOString()
+        },
+        ...s.chatHistory
+      ].slice(0, 50)
+      saveChatHistory(next)
+      return { chatHistory: next }
+    })
+  },
+
+  clearChatHistory: () => {
+    clearChatHistoryStorage()
+    set({ chatHistory: [] })
   },
 
   toggleProfileSetup: (v) => set((s) => ({ profileSetupOpen: v ?? !s.profileSetupOpen })),
@@ -909,5 +1053,54 @@ export const useStore = create<AppState>((set, get) => ({
       }
     }),
 
-  clearRunOutput: () => set({ runOutput: [] })
+  clearRunOutput: () => set({ runOutput: [] }),
+
+  // Apply a code block that the AI returned. With a file open in the editor we
+  // overwrite it; inside a project with no file open we create `suggestedName`
+  // and write into it. Anything else is a no-op with a friendly reason.
+  applyCode: async (code, suggestedName) => {
+    const workspace = get().workspace
+
+    if (workspace?.selectedFile) {
+      get().updateWorkspaceContent(code)
+      const ok = await get().saveWorkspaceFile(code)
+      return ok
+        ? { ok: true, message: `Applied to ${workspace.selectedFile.relativePath}` }
+        : { ok: false, message: get().workspaceError ?? 'Could not write the file.' }
+    }
+
+    if (workspace?.kind === 'project') {
+      const relativePath = suggestedName?.trim()
+      if (!relativePath) return { ok: false, message: 'A file name is required.' }
+      try {
+        const created = await window.api.createWorkspaceEntry({
+          workspacePath: workspace.path,
+          kind: 'file',
+          relativePath
+        })
+        const file = created.files.find(
+          (f) => f.relativePath === relativePath || f.relativePath.endsWith(relativePath)
+        )
+        if (!file) {
+          saveWorkspaceRef(created)
+          set({ workspace: created, workspaceError: null })
+          return { ok: false, message: 'File created but could not be located to write into.' }
+        }
+        const result = await window.api.writeWorkspaceFile({ file, content: code })
+        const nextWorkspace: WorkspaceOpenResult = {
+          ...created,
+          selectedFile: result.file,
+          content: result.content,
+          truncated: result.truncated
+        }
+        saveWorkspaceRef(nextWorkspace)
+        set({ workspace: nextWorkspace, workspaceError: null })
+        return { ok: true, message: `Created ${result.file.relativePath}` }
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : 'Could not create the file.' }
+      }
+    }
+
+    return { ok: false, message: 'Open a file or project first, then Approve.' }
+  }
 }))

@@ -1,7 +1,7 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, protocol, clipboard } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, protocol, clipboard, Menu } from 'electron'
 import { promises as fs } from 'fs'
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'path'
-import { loadModels } from './model-registry'
+import { loadModels, saveModels } from './model-registry'
 import { readCliUsage } from './usage-reader'
 import {
   createSession,
@@ -12,8 +12,11 @@ import {
 } from './pty-manager'
 import { startStats, stopStats } from './stats-service'
 import { startRun, stopRun } from './run-manager'
+import { startChat, cancelChat, cancelAllChats } from './chat-manager'
 import type {
   AttachmentSaveResult,
+  ChatSendPayload,
+  ModelDef,
   PtyCreatePayload,
   RunStartPayload,
   WorkspaceFile,
@@ -343,6 +346,24 @@ function timestampSlug(): string {
   return new Date().toISOString().replace(/[:.]/g, '-')
 }
 
+// Read an image already on disk into the same shape as a saved attachment, so
+// picked / dropped images get a thumbnail (dataUrl) without being copied. The
+// model is later handed the original `path`.
+async function readImageAttachment(path: string): Promise<AttachmentSaveResult> {
+  const ext = extname(path).toLowerCase()
+  const mime = IMAGE_MIME.get(ext) ?? 'application/octet-stream'
+  const stat = await fs.stat(path)
+  if (stat.size > ATTACHMENT_LIMIT) {
+    throw new Error(`${basename(path)} is too large to attach (over 25 MB).`)
+  }
+  const buffer = await fs.readFile(path)
+  return {
+    path,
+    name: basename(path),
+    dataUrl: `data:${mime};base64,${buffer.toString('base64')}`
+  }
+}
+
 async function saveClipboardImage(): Promise<AttachmentSaveResult | null> {
   const image = clipboard.readImage()
   if (image.isEmpty()) return null
@@ -363,6 +384,40 @@ async function saveClipboardImage(): Promise<AttachmentSaveResult | null> {
     name,
     dataUrl: `data:image/png;base64,${png.toString('base64')}`
   }
+}
+
+// Without an application menu, Electron does not register the standard
+// Cut/Copy/Paste/Select-All keyboard accelerators, so Ctrl/Cmd+C can't copy
+// selected UI text. Install a menu (kept hidden on the frameless Win/Linux
+// windows) purely to wire those roles up.
+function setupAppMenu(): void {
+  const isMac = process.platform === 'darwin'
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: 'appMenu' as const }] : []),
+    { role: 'editMenu' },
+    { role: 'windowMenu' }
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+// Right-click anywhere → Copy (when text is selected) plus Cut/Paste/Select-All
+// where editing makes sense.
+function attachContextMenu(win: BrowserWindow): void {
+  win.webContents.on('context-menu', (_e, params) => {
+    const hasSelection = params.selectionText.trim().length > 0
+    // Only show the native Cut/Copy/Paste menu where it makes sense: in an
+    // editable field or over selected text. Otherwise stay out of the way so the
+    // app's own right-click menus (e.g. the file tree's "Preview File") show
+    // instead of being covered by a native popup.
+    if (!params.isEditable && !hasSelection) return
+
+    const items: Electron.MenuItemConstructorOptions[] = []
+    if (params.isEditable) items.push({ role: 'cut', enabled: params.editFlags.canCut })
+    items.push({ role: 'copy', enabled: hasSelection })
+    if (params.isEditable) items.push({ role: 'paste', enabled: params.editFlags.canPaste })
+    items.push({ type: 'separator' }, { role: 'selectAll' })
+    Menu.buildFromTemplate(items).popup({ window: win })
+  })
 }
 
 function createWindow(): void {
@@ -397,6 +452,8 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  attachContextMenu(mainWindow)
+
   const rendererUrl = process.env['ELECTRON_RENDERER_URL']
   if (rendererUrl) {
     mainWindow.loadURL(rendererUrl)
@@ -409,6 +466,8 @@ function createWindow(): void {
 
 function registerIpc(): void {
   ipcMain.handle('models:list', () => loadModels())
+
+  ipcMain.handle('models:save', (_e, models: ModelDef[]) => saveModels(models))
 
   ipcMain.handle('usage:get', (_e, modelId: string) => readCliUsage(modelId))
 
@@ -496,6 +555,23 @@ function registerIpc(): void {
     return saveClipboardImage()
   })
 
+  ipcMain.handle('attachments:pick-images', async (): Promise<AttachmentSaveResult[]> => {
+    const options = {
+      title: 'Attach images',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Images', extensions: [...IMAGE_MIME.keys()].map((x) => x.slice(1)) }]
+    } satisfies Electron.OpenDialogOptions
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled || result.filePaths.length === 0) return []
+    return Promise.all(result.filePaths.map(readImageAttachment))
+  })
+
+  ipcMain.on('clipboard:write-text', (_e, text: string) => {
+    clipboard.writeText(text)
+  })
+
   ipcMain.on('pty:create', (_e, payload: PtyCreatePayload) => {
     if (mainWindow) createSession(mainWindow, payload)
   })
@@ -512,6 +588,12 @@ function registerIpc(): void {
   })
   ipcMain.on('run:stop', () => stopRun())
 
+  ipcMain.on('chat:send', (event, payload: ChatSendPayload) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (window) startChat(window, payload)
+  })
+  ipcMain.on('chat:cancel', (_e, { id }: { id: string }) => cancelChat(id))
+
   ipcMain.on('win:minimize', (event) => BrowserWindow.fromWebContents(event.sender)?.minimize())
   ipcMain.on('win:maximize', (event) => {
     const window = BrowserWindow.fromWebContents(event.sender)
@@ -524,6 +606,7 @@ function registerIpc(): void {
 
 app.whenReady().then(() => {
   registerAppProtocol()
+  setupAppMenu()
   registerIpc()
   createWindow()
 
@@ -535,6 +618,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   killAll()
   stopRun()
+  cancelAllChats()
   stopStats()
   if (process.platform !== 'darwin') app.quit()
 })
@@ -542,5 +626,6 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   killAll()
   stopRun()
+  cancelAllChats()
   stopStats()
 })

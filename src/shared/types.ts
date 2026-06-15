@@ -6,6 +6,8 @@ export interface ModelDef {
   tag: string
   command: string
   accent: string
+  /** True for models the user added through the UI (vs the built-in defaults). */
+  custom?: boolean
 }
 
 export interface PtyCreatePayload {
@@ -168,4 +170,28 @@ export interface RunOutput {
 export interface RunExit {
   code: number | null
   signal?: string
+}
+
+export interface ChatSendPayload {
+  /** Caller-generated id used to correlate the streamed reply. */
+  id: string
+  modelId: string
+  /** The model's command, sent directly so main doesn't re-read it from disk. */
+  command: string
+  prompt: string
+  cwd?: string
+  /** Absolute paths of image files to send to the model (vision input). */
+  images?: string[]
+}
+
+export interface ChatData {
+  id: string
+  stream: 'stdout' | 'stderr'
+  chunk: string
+}
+
+export interface ChatExit {
+  id: string
+  code: number | null
+  error?: string
 }

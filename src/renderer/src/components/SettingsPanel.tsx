@@ -433,6 +433,17 @@ function isValidRemoteHost(value: string): boolean {
   return /^[a-z0-9.-]+:\d{1,5}$/i.test(value)
 }
 
+function formatHistoryDate(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Unknown time'
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+}
+
 export default function SettingsPanel(): JSX.Element | null {
   const open = useStore((s) => s.settingsOpen)
   const toggleSettings = useStore((s) => s.toggleSettings)
@@ -455,12 +466,16 @@ export default function SettingsPanel(): JSX.Element | null {
   const setTerminalSettings = useStore((s) => s.setTerminalSettings)
   const privacySettings = useStore((s) => s.privacySettings)
   const setPrivacySettings = useStore((s) => s.setPrivacySettings)
+  const chatHistory = useStore((s) => s.chatHistory)
+  const clearChatHistory = useStore((s) => s.clearChatHistory)
   const editorSettings = useStore((s) => s.editorSettings)
   const setEditorSettings = useStore((s) => s.setEditorSettings)
   const clearLocalData = useStore((s) => s.clearLocalData)
   const models = useStore((s) => s.models)
   const sessions = useStore((s) => s.sessions)
   const addSession = useStore((s) => s.addSession)
+  const removeModel = useStore((s) => s.removeModel)
+  const toggleAddModel = useStore((s) => s.toggleAddModel)
   const stats = useStore((s) => s.stats)
   const profile = useStore((s) => s.profile)
   const toggleProfileSetup = useStore((s) => s.toggleProfileSetup)
@@ -1262,9 +1277,14 @@ export default function SettingsPanel(): JSX.Element | null {
                   <h3>AI usage</h3>
                   <p>Every model GenNal can launch, and whether you currently have it connected.</p>
                 </div>
-                <span className={`usage-status-pill ${connectedModels > 0 ? 'on' : ''}`}>
-                  {connectedModels > 0 ? `${connectedModels} online` : 'None connected'}
-                </span>
+                <div className="usage-head-actions">
+                  <span className={`usage-status-pill ${connectedModels > 0 ? 'on' : ''}`}>
+                    {connectedModels > 0 ? `${connectedModels} online` : 'None connected'}
+                  </span>
+                  <button className="usage-add-btn" onClick={() => toggleAddModel(true)}>
+                    + Add model
+                  </button>
+                </div>
               </div>
 
               <div className="usage-list" aria-label="AI usage">
@@ -1299,6 +1319,18 @@ export default function SettingsPanel(): JSX.Element | null {
                       >
                         {connected ? 'New session' : 'Connect'}
                       </button>
+                      {model.custom && (
+                        <button
+                          className="usage-remove"
+                          onClick={() => void removeModel(model.id)}
+                          title={`Remove ${model.label}`}
+                          aria-label={`Remove ${model.label}`}
+                        >
+                          <svg viewBox="0 0 16 16" width="13" height="13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+                            <path d="M4 4l8 8M12 4l-8 8" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1328,6 +1360,10 @@ export default function SettingsPanel(): JSX.Element | null {
                 <div className="settings-summary">
                   <span>Clear on exit</span>
                   <strong>{privacySettings.clearOnExit ? 'On' : 'Off'}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Chat history</span>
+                  <strong>{chatHistory.length}</strong>
                 </div>
               </div>
 
@@ -1360,6 +1396,48 @@ export default function SettingsPanel(): JSX.Element | null {
                   </div>
                 )
               })}
+
+              <div className="settings-card privacy-history-card">
+                <div>
+                  <h3>Chat history</h3>
+                  <p>Recent chat prompts and model replies stored locally on this device.</p>
+                </div>
+                <button
+                  className="settings-close danger"
+                  disabled={chatHistory.length === 0}
+                  onClick={clearChatHistory}
+                >
+                  Clear chat
+                </button>
+              </div>
+
+              {chatHistory.length === 0 ? (
+                <div className="settings-placeholder remote-empty chat-history-empty">
+                  <h3>No chat history</h3>
+                  <p>Completed chats will appear here when history is enabled.</p>
+                </div>
+              ) : (
+                <div className="chat-history-list" aria-label="Chat history">
+                  {chatHistory.slice(0, 12).map((entry) => {
+                    const userMessage = entry.messages.find((message) => message.role === 'user')
+                    const assistantMessage = entry.messages.find((message) => message.role === 'assistant')
+                    return (
+                      <div className="chat-history-card" key={entry.id}>
+                        <div className="chat-history-head">
+                          <span>{entry.modelLabel}</span>
+                          <time dateTime={entry.createdAt}>{formatHistoryDate(entry.createdAt)}</time>
+                        </div>
+                        <p className="chat-history-prompt">{userMessage?.text ?? 'Prompt unavailable'}</p>
+                        {assistantMessage && (
+                          <p className={`chat-history-reply${assistantMessage.error ? ' error' : ''}`}>
+                            {assistantMessage.text}
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
 
               <div className="settings-card privacy-danger-card">
                 <div>
