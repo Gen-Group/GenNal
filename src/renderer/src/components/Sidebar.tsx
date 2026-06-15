@@ -18,6 +18,16 @@ interface MutableFileTreeNode {
   fileCount: number
 }
 
+type WorkspaceFilterId = 'all' | 'code' | 'docs' | 'images' | 'config'
+
+const WORKSPACE_FILTERS: { id: WorkspaceFilterId; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'code', label: 'Code' },
+  { id: 'docs', label: 'Docs' },
+  { id: 'images', label: 'Images' },
+  { id: 'config', label: 'Config' }
+]
+
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico', '.avif']
 
 function fileExt(file: WorkspaceFile): string {
@@ -59,6 +69,17 @@ function fileDisplayPath(file: WorkspaceFile): { name: string; folder: string } 
 
 function fileName(file: WorkspaceFile): string {
   return fileDisplayPath(file).name
+}
+
+function matchesWorkspaceFilter(file: WorkspaceFile, filter: WorkspaceFilterId): boolean {
+  if (filter === 'all') return true
+
+  const kind = fileKind(file)
+  if (filter === 'images') return kind === 'img'
+  if (filter === 'docs') return kind === 'doc'
+  if (filter === 'config') return kind === 'data' || kind === 'env' || kind === 'cmake'
+
+  return ['js', 'cpp', 'swift', 'dart', 'css', 'html', 'code'].includes(kind)
 }
 
 function toFileTree(node: MutableFileTreeNode): FileTreeNode {
@@ -142,7 +163,11 @@ function Spark({ color }: { color: string }): JSX.Element {
 export default function Sidebar(): JSX.Element {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set())
   const [folderMenu, setFolderMenu] = useState<{ folder: string; x: number; y: number } | null>(null)
+  const [fileMenu, setFileMenu] = useState<{ file: WorkspaceFile; x: number; y: number } | null>(null)
   const [workspaceMenu, setWorkspaceMenu] = useState<{ x: number; y: number } | null>(null)
+  const [filterMenu, setFilterMenu] = useState<{ x: number; y: number } | null>(null)
+  const [workspaceFilter, setWorkspaceFilter] = useState<WorkspaceFilterId>('all')
+  const [confirmNewWindowOpen, setConfirmNewWindowOpen] = useState(false)
   const sessions = useStore((s) => s.sessions)
   const activeId = useStore((s) => s.activeId)
   const setActive = useStore((s) => s.setActive)
@@ -160,8 +185,6 @@ export default function Sidebar(): JSX.Element {
   const createWorkspaceFolder = useStore((s) => s.createWorkspaceFolder)
   const openImagePreview = useStore((s) => s.openImagePreview)
   const running = sessions.filter((s) => s.status === 'running').length
-  const fileTree = workspace ? buildFileTree(workspace.files.slice(0, 120)) : undefined
-  const menuFolder = folderMenu && fileTree ? findFolder(fileTree, folderMenu.folder) : undefined
   const workspaceName = workspace?.name ?? 'Open workspace'
   const primarySessions = sessions.slice(0, 3)
   const aiModel = models.find((model) => model.id === 'codex') ?? models.find((model) => model.id !== 'custom')
@@ -171,12 +194,21 @@ export default function Sidebar(): JSX.Element {
   const branchName = git?.branch ?? ''
   const branchUrl = git?.branchUrl
   const hasRemote = Boolean(git?.remoteUrl)
+  const filteredFiles = workspace
+    ? workspace.files.filter((file) => matchesWorkspaceFilter(file, workspaceFilter))
+    : []
+  const fileTree = workspace ? buildFileTree(filteredFiles.slice(0, 120)) : undefined
+  const menuFolder = folderMenu && fileTree ? findFolder(fileTree, folderMenu.folder) : undefined
+  const activeFilterLabel =
+    WORKSPACE_FILTERS.find((filter) => filter.id === workspaceFilter)?.label ?? 'All'
 
   useEffect(() => {
-    if (!folderMenu && !workspaceMenu) return
+    if (!folderMenu && !fileMenu && !workspaceMenu && !filterMenu) return
     const closeAll = (): void => {
       setFolderMenu(null)
+      setFileMenu(null)
       setWorkspaceMenu(null)
+      setFilterMenu(null)
     }
     window.addEventListener('click', closeAll)
     window.addEventListener('keydown', closeAll)
@@ -184,7 +216,7 @@ export default function Sidebar(): JSX.Element {
       window.removeEventListener('click', closeAll)
       window.removeEventListener('keydown', closeAll)
     }
-  }, [folderMenu, workspaceMenu])
+  }, [folderMenu, fileMenu, workspaceMenu, filterMenu])
 
   const toggleFolder = (folder: string): void => {
     setCollapsedFolders((current) => {
@@ -215,6 +247,16 @@ export default function Sidebar(): JSX.Element {
     if (name?.trim()) void createWorkspaceFolder(nestedPath(folder, name))
   }
 
+  const requestNewWindow = (): void => {
+    setWorkspaceMenu(null)
+    setConfirmNewWindowOpen(true)
+  }
+
+  const confirmNewWindow = (): void => {
+    window.api.win.newWindow()
+    setConfirmNewWindowOpen(false)
+  }
+
   const openBranch = (): void => {
     if (branchUrl) {
       window.open(branchUrl, '_blank', 'noopener,noreferrer')
@@ -231,8 +273,8 @@ export default function Sidebar(): JSX.Element {
       onClick={() => (isImageFile(file) ? void openImagePreview(file) : void openWorkspaceFile(file))}
       onContextMenu={(event) => {
         event.preventDefault()
-        if (isImageFile(file)) void openImagePreview(file)
-        else void openWorkspaceFile(file)
+        event.stopPropagation()
+        setFileMenu({ file, x: event.clientX, y: event.clientY })
       }}
     >
       <FileGlyph file={file} />
@@ -286,7 +328,18 @@ export default function Sidebar(): JSX.Element {
         <div className="workspace-top">
           <span>Workspaces</span>
           <div className="workspace-tools">
-            <button className="workspace-tool" title="Workspace filters" aria-label="Workspace filters">
+            <button
+              className={`workspace-tool ${filterMenu ? 'active' : ''}`}
+              title="Workspace filters"
+              aria-label="Workspace filters"
+              aria-expanded={Boolean(filterMenu)}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                const rect = event.currentTarget.getBoundingClientRect()
+                setFilterMenu({ x: rect.right - 148, y: rect.bottom + 6 })
+              }}
+            >
               <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
                 <path d="M2 4h7M12 4h2M2 8h2M7 8h7M2 12h9M14 12h0" />
                 <circle cx="10.5" cy="4" r="1.6" fill="var(--panel,#0c0e16)" />
@@ -319,10 +372,31 @@ export default function Sidebar(): JSX.Element {
             </button>
           </div>
         </div>
+        {filterMenu && (
+          <div
+            className="workspace-filter-menu"
+            style={{ left: filterMenu.x, top: filterMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {WORKSPACE_FILTERS.map((filter) => (
+              <button
+                key={filter.id}
+                className={workspaceFilter === filter.id ? 'active' : ''}
+                onClick={() => {
+                  setWorkspaceFilter(filter.id)
+                  setFilterMenu(null)
+                }}
+              >
+                <span>{filter.label}</span>
+                <span>{workspace?.files.filter((file) => matchesWorkspaceFilter(file, filter.id)).length ?? 0}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="workspace-filter">
           <span className="list-icon" />
-          <span>All</span>
-          <span className="workspace-filter-count">{workspace ? 1 : 0}</span>
+          <span>{activeFilterLabel}</span>
+          <span className="workspace-filter-count">{filteredFiles.length}</span>
         </div>
         <div className={`workspace-stack ${workspace ? 'active' : ''}`}>
           {isRepo ? (
@@ -431,6 +505,13 @@ export default function Sidebar(): JSX.Element {
             >
               Upload Project
             </button>
+            <button
+              onClick={() => {
+                requestNewWindow()
+              }}
+            >
+              New Window
+            </button>
           </div>
         )}
         {workspaceError && <div className="side-error">{workspaceError}</div>}
@@ -438,9 +519,29 @@ export default function Sidebar(): JSX.Element {
           <div className="file-list">
             {fileTree?.files.map(renderFile)}
             {fileTree?.folders.map((folder) => renderFolder(folder))}
-            {workspace.files.length > 120 && (
-              <div className="file-more">+{workspace.files.length - 120} more files</div>
+            {filteredFiles.length === 0 && (
+              <div className="file-more">No files match this filter</div>
             )}
+            {filteredFiles.length > 120 && (
+              <div className="file-more">+{filteredFiles.length - 120} more files</div>
+            )}
+          </div>
+        )}
+        {fileMenu && (
+          <div
+            className="file-menu"
+            style={{ left: fileMenu.x, top: fileMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                if (isImageFile(fileMenu.file)) void openImagePreview(fileMenu.file)
+                else void openWorkspaceFile(fileMenu.file)
+                setFileMenu(null)
+              }}
+            >
+              Preview File
+            </button>
           </div>
         )}
         {folderMenu && menuFolder && (
@@ -511,18 +612,85 @@ export default function Sidebar(): JSX.Element {
         </div>
       </section>
 
-      <section className="side-sec">
+      <section className="side-sec quick-actions-sec">
         <div className="side-head"><span>QUICK ACTIONS</span></div>
         <button className="qa" onClick={() => togglePalette(true)}>
-          Command Palette <kbd>Ctrl K</kbd>
+          <span className="qa-main">
+            <span className="qa-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 4h10M3 8h10M3 12h6" />
+              </svg>
+            </span>
+            <span>Command Palette</span>
+          </span>
+          <kbd>Ctrl K</kbd>
         </button>
-        <button className="qa" onClick={() => window.api.win.newWindow()}>
-          New Window <kbd>Ctrl N</kbd>
+        <button className="qa" onClick={requestNewWindow}>
+          <span className="qa-main">
+            <span className="qa-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="10" height="10" rx="1.5" />
+                <path d="M8 5.5v5M5.5 8h5" />
+              </svg>
+            </span>
+            <span>New Window</span>
+          </span>
+          <kbd>Ctrl N</kbd>
         </button>
         <button className="qa soon" disabled title="Mobile app — coming soon">
-          Mobile <span className="soon-pill">Coming soon</span>
+          <span className="qa-main">
+            <span className="qa-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="5" y="2" width="6" height="12" rx="1.4" />
+                <path d="M7.4 12h1.2" />
+              </svg>
+            </span>
+            <span>Mobile</span>
+          </span>
+          <span className="soon-pill">Coming soon</span>
         </button>
       </section>
+
+      {confirmNewWindowOpen && (
+        <div className="confirm-popover-backdrop" onMouseDown={() => setConfirmNewWindowOpen(false)}>
+          <div
+            className="confirm-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-window-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              className="confirm-hide"
+              title="Hide"
+              aria-label="Hide new window prompt"
+              onClick={() => setConfirmNewWindowOpen(false)}
+            >
+              <svg viewBox="0 0 14 14" width="13" height="13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+                <path d="M3.5 3.5 L10.5 10.5 M10.5 3.5 L3.5 10.5" />
+              </svg>
+            </button>
+            <div className="confirm-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="10" height="10" rx="1.5" />
+                <path d="M8 5.5v5M5.5 8h5" />
+              </svg>
+            </div>
+            <div className="confirm-copy">
+              <h3 id="new-window-title">Create new window?</h3>
+              <p>This opens another GenNal workspace window.</p>
+            </div>
+            <div className="confirm-actions">
+              <button className="confirm-secondary" onClick={() => setConfirmNewWindowOpen(false)}>
+                Hide
+              </button>
+              <button className="confirm-primary" onClick={confirmNewWindow}>
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <button
         className={`side-user ${profile.name ? '' : 'unset'}`}
@@ -536,9 +704,9 @@ export default function Sidebar(): JSX.Element {
             userInitials(profile.name)
           )}
         </div>
-        <div>
+        <div className="user-copy">
           <div className="u-name">{profile.name || 'Add your name'}</div>
-          <div className="u-state">{profile.name ? (profile.role || '● Online') : 'Set up your profile'}</div>
+          <div className="u-state">{profile.name ? (profile.role || 'Online') : 'Set up your profile'}</div>
         </div>
       </button>
     </aside>

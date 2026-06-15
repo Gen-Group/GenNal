@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, protocol } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, protocol, clipboard } from 'electron'
 import { promises as fs } from 'fs'
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'path'
 import { loadModels } from './model-registry'
@@ -12,6 +12,7 @@ import {
 import { startStats, stopStats } from './stats-service'
 import { startRun, stopRun } from './run-manager'
 import type {
+  AttachmentSaveResult,
   PtyCreatePayload,
   RunStartPayload,
   WorkspaceFile,
@@ -178,6 +179,7 @@ const IMAGE_MIME = new Map<string, string>([
   ['.avif', 'image/avif']
 ])
 const IMAGE_PREVIEW_LIMIT = 25 * 1024 * 1024 // 25 MB
+const ATTACHMENT_LIMIT = 25 * 1024 * 1024 // 25 MB
 
 function toWorkspaceFile(path: string, root?: string, size = 0): WorkspaceFile {
   const name = basename(path)
@@ -336,6 +338,32 @@ function resolveWorkspaceEntry(root: string, entryPath: string): string {
   return target
 }
 
+function timestampSlug(): string {
+  return new Date().toISOString().replace(/[:.]/g, '-')
+}
+
+async function saveClipboardImage(): Promise<AttachmentSaveResult | null> {
+  const image = clipboard.readImage()
+  if (image.isEmpty()) return null
+
+  const png = image.toPNG()
+  if (png.byteLength > ATTACHMENT_LIMIT) {
+    throw new Error('Clipboard image is too large to attach (over 25 MB).')
+  }
+
+  const attachmentDir = join(app.getPath('userData'), 'attachments')
+  await fs.mkdir(attachmentDir, { recursive: true })
+  const name = `clipboard-${timestampSlug()}.png`
+  const path = join(attachmentDir, name)
+  await fs.writeFile(path, png)
+
+  return {
+    path,
+    name,
+    dataUrl: `data:image/png;base64,${png.toString('base64')}`
+  }
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1480,
@@ -453,6 +481,10 @@ function registerIpc(): void {
       path: payload.workspacePath,
       selectedFilePath: target
     })
+  })
+
+  ipcMain.handle('attachments:save-clipboard-image', async (): Promise<AttachmentSaveResult | null> => {
+    return saveClipboardImage()
   })
 
   ipcMain.on('pty:create', (_e, payload: PtyCreatePayload) => {

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  AttachmentSaveResult,
   ModelDef,
   PtyCreatePayload,
   PtyData,
@@ -33,6 +34,8 @@ const api = {
     ipcRenderer.invoke('workspace:write-file', payload),
   createWorkspaceEntry: (payload: WorkspaceCreateEntryPayload): Promise<WorkspaceOpenResult> =>
     ipcRenderer.invoke('workspace:create-entry', payload),
+  saveClipboardImage: (): Promise<AttachmentSaveResult | null> =>
+    ipcRenderer.invoke('attachments:save-clipboard-image'),
 
   ptyCreate: (payload: PtyCreatePayload): void => ipcRenderer.send('pty:create', payload),
   ptyInput: (id: string, data: string): void => ipcRenderer.send('pty:input', { id, data }),

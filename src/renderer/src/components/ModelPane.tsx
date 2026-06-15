@@ -1,4 +1,13 @@
-import { useEffect, useRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent as ReactClipboardEvent,
+  type CSSProperties,
+  type DragEvent as ReactDragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent
+} from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { useStore, type Session } from '../store'
@@ -13,6 +22,13 @@ interface KeyLikeEvent {
   key: string
   metaKey: boolean
 }
+
+interface AttachmentNotice {
+  name: string
+  src: string
+}
+
+type DroppedFile = File & { path?: string }
 
 function keyToPtyData(e: KeyLikeEvent): string | null {
   if (e.ctrlKey && e.key.length === 1) {
@@ -48,10 +64,24 @@ function keyToPtyData(e: KeyLikeEvent): string | null {
   }
 }
 
+function hasImageItem(items: DataTransferItemList): boolean {
+  return Array.from(items).some((item) => item.kind === 'file' && item.type.startsWith('image/'))
+}
+
+function isImagePath(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i.test(path)
+}
+
+function quotePath(path: string): string {
+  return `"${path.replace(/"/g, '\\"')}"`
+}
+
 export default function ModelPane({ session }: { session: Session }): JSX.Element {
   const paneRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
+  const noticeTimerRef = useRef<number | null>(null)
+  const [attachmentNotice, setAttachmentNotice] = useState<AttachmentNotice | null>(null)
   const setStatus = useStore((s) => s.setStatus)
   const removeSession = useStore((s) => s.removeSession)
   const setActive = useStore((s) => s.setActive)
@@ -138,10 +168,69 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
     }
   }, [activeId, session.id])
 
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current)
+    }
+  }, [])
+
   const focusPane = (): void => {
     setActive(session.id)
     paneRef.current?.focus()
     terminalRef.current?.focus()
+  }
+
+  const showAttachmentNotice = (notice: AttachmentNotice): void => {
+    setAttachmentNotice(notice)
+    if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current)
+    noticeTimerRef.current = window.setTimeout(() => {
+      setAttachmentNotice(null)
+      noticeTimerRef.current = null
+    }, 3200)
+  }
+
+  const insertAttachmentPath = (path: string): void => {
+    setActive(session.id)
+    window.api.ptyInput(session.id, quotePath(path))
+    terminalRef.current?.focus()
+  }
+
+  const onPanePaste = async (e: ReactClipboardEvent<HTMLDivElement>): Promise<void> => {
+    if (!hasImageItem(e.clipboardData.items)) return
+    e.preventDefault()
+    e.stopPropagation()
+
+    try {
+      const attachment = await window.api.saveClipboardImage()
+      if (!attachment) return
+      insertAttachmentPath(attachment.path)
+      showAttachmentNotice({ name: attachment.name, src: attachment.dataUrl })
+    } catch {
+      showAttachmentNotice({ name: 'Unable to attach clipboard image', src: '' })
+    }
+  }
+
+  const onPaneDrop = (e: ReactDragEvent<HTMLDivElement>): void => {
+    const file = Array.from(e.dataTransfer.files).find((entry) => {
+      const dropped = entry as DroppedFile
+      return dropped.path && isImagePath(dropped.path)
+    }) as DroppedFile | undefined
+
+    if (!file?.path) return
+    e.preventDefault()
+    e.stopPropagation()
+
+    insertAttachmentPath(file.path)
+    const src = URL.createObjectURL(file)
+    showAttachmentNotice({ name: file.name, src })
+    window.setTimeout(() => URL.revokeObjectURL(src), 3500)
+  }
+
+  const onPaneDragOver = (e: ReactDragEvent<HTMLDivElement>): void => {
+    const hasFile = Array.from(e.dataTransfer.items).some((item) => item.kind === 'file')
+    if (!hasFile) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
   }
 
   const onPaneKeyDown = (e: ReactKeyboardEvent): void => {
@@ -168,6 +257,9 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
       onMouseDown={focusPane}
       onClick={focusPane}
       onKeyDown={onPaneKeyDown}
+      onPasteCapture={(e) => void onPanePaste(e)}
+      onDragOver={onPaneDragOver}
+      onDrop={onPaneDrop}
       tabIndex={0}
     >
       <div className="pane-head">
@@ -208,6 +300,16 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
         </span>
       </div>
       <div className="pane-term" ref={termRef} onMouseDown={focusPane} />
+      {attachmentNotice && (
+        <div className="pane-attachment" role="status">
+          {attachmentNotice.src ? (
+            <img src={attachmentNotice.src} alt="" />
+          ) : (
+            <span className="pane-attachment-icon" aria-hidden="true">!</span>
+          )}
+          <span title={attachmentNotice.name}>{attachmentNotice.name}</span>
+        </div>
+      )}
     </div>
   )
 }

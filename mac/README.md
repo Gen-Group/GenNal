@@ -17,8 +17,8 @@ bash mac/install.sh
 This installs **GenNal.app** into `/Applications` and also leaves the distributable
 installers in `dist/`:
 
-- `GenNal-1.0.3-arm64.dmg` — Apple Silicon (M1/M2/M3/M4)
-- `GenNal-1.0.3-x64.dmg` — Intel
+- `GenNal-1.0.4-arm64.dmg` — Apple Silicon (M1/M2/M3/M4)
+- `GenNal-1.0.4-x64.dmg` — Intel
 
 ## Option B — build the `.dmg` only
 
@@ -43,5 +43,5 @@ The build is unsigned, so the first time macOS will warn you. Either:
 After building on a Mac, attach the installers to the release so others can download them:
 
 ```bash
-gh release upload v1.0.3 dist/GenNal-1.0.3-arm64.dmg dist/GenNal-1.0.3-x64.dmg
+gh release upload v1.0.4 dist/GenNal-1.0.4-arm64.dmg dist/GenNal-1.0.4-x64.dmg
 ```

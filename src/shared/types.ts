@@ -84,6 +84,12 @@ export interface WorkspaceImageResult {
   mime: string
 }
 
+export interface AttachmentSaveResult {
+  path: string
+  name: string
+  dataUrl: string
+}
+
 export type RunStream = 'stdout' | 'stderr' | 'system'
 
 export interface RunStartPayload {
