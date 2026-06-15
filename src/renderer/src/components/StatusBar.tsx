@@ -14,7 +14,7 @@ export default function StatusBar(): JSX.Element {
       <span className="sb-item">● Main</span>
       <span className="sb-item">Layout: {mode} ({rows}×{cols})</span>
       <span className="sb-item">UTF-8</span>
-      <span className="sb-item">Shell: PowerShell</span>
+      <span className="sb-item">Shell: {window.api.shellName}</span>
       <span className="sb-spacer" />
       <span className="sb-item">{active ? `Model: ${active.label}` : 'No model'}</span>
       <span className="sb-item">CPU: {stats.cpu}%</span>

@@ -365,16 +365,22 @@ async function saveClipboardImage(): Promise<AttachmentSaveResult | null> {
 }
 
 function createWindow(): void {
+  const isMac = process.platform === 'darwin'
+
   mainWindow = new BrowserWindow({
     width: 1480,
     height: 920,
     minWidth: 1040,
     minHeight: 680,
     show: false,
-    frame: false,
     icon: join(__dirname, '../../build/icon.ico'),
     backgroundColor: '#0a0b10',
-    titleBarStyle: 'hidden',
+    // macOS: keep the native window chrome — hide the title bar but show the
+    // native traffic-light controls (and let them drive minimize/maximize/close).
+    // Windows/Linux: fully frameless so we can draw our own window controls.
+    ...(isMac
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 18, y: 18 } }
+      : { frame: false }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,

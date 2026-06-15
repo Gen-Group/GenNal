@@ -227,12 +227,21 @@ select {
 .titlebar {
   display: flex; align-items: center; gap: 16px; padding: 0 12px;
   background: var(--bg2); border-bottom: 1px solid var(--line);
+  /* The whole bar is a drag handle; interactive children opt back out below. */
+  -webkit-app-region: drag;
 }
+/* macOS draws native traffic lights at top-left — leave room so the brand
+   doesn't sit underneath them. */
+.titlebar.is-mac { padding-left: 84px; }
 .drag { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
-.tb-left { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.tb-center { flex: 1; display: flex; justify-content: center; }
-.tb-right { display: flex; align-items: center; gap: 8px; }
+/* Anything clickable in the title bar must not steal the drag region. */
+.titlebar button,
+.titlebar .quick-cmd,
+.titlebar a { -webkit-app-region: no-drag; }
+.tb-left { display: flex; align-items: center; gap: 8px; flex: 0 1 auto; min-width: 0; }
+.tb-center { flex: 1 1 auto; display: flex; justify-content: center; min-width: 0; }
+.tb-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .brand-mark {
   width: 28px; height: 28px; border-radius: 50%; object-fit: cover;
   box-shadow: 0 0 18px -6px #27d9ffcc;
@@ -243,10 +252,15 @@ select {
   background: #7c5cff22; color: var(--accent2); border: 1px solid #7c5cff44;
 }
 .quick-cmd {
-  display: flex; align-items: center; gap: 12px; width: 360px; justify-content: space-between;
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; max-width: 360px; min-width: 0; justify-content: space-between;
   background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
   padding: 6px 12px; color: var(--muted); font-size: 12px;
 }
+.quick-cmd > span {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.quick-cmd kbd { flex: 0 0 auto; }
 .quick-cmd:hover { border-color: #7c5cff55; }
 .icon-btn, .win-btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -260,6 +274,16 @@ select {
 .sidebar-toggle { margin-right: 4px; }
 .sidebar-toggle.active { color: var(--text); }
 .panel-toggle.active { color: var(--text); }
+
+/* ---- title bar responsiveness ---- */
+@media (max-width: 1180px) {
+  .titlebar { gap: 10px; }
+  .quick-cmd kbd { display: none; }
+}
+@media (max-width: 980px) {
+  .brand-pill { display: none; }
+  .brand-name { display: none; }
+}
 
 /* ---- buttons / menu ---- */
 .btn {
