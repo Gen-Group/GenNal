@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type UIEvent
 } from 'react'
@@ -92,6 +93,7 @@ export default function RightPanel(): JSX.Element {
   const runFile = useStore((s) => s.runFile)
   const stopRun = useStore((s) => s.stopRun)
   const clearRunOutput = useStore((s) => s.clearRunOutput)
+  const editorSettings = useStore((s) => s.editorSettings)
   const outputRef = useRef<HTMLDivElement>(null)
   const autoSaveDirtyRef = useRef(false)
   const autoSavePathRef = useRef<string | undefined>(undefined)
@@ -131,6 +133,22 @@ export default function RightPanel(): JSX.Element {
   const handleScroll = (event: UIEvent<HTMLTextAreaElement>): void => {
     const target = event.currentTarget
     setScroll({ left: target.scrollLeft, top: target.scrollTop })
+  }
+
+  // Insert a real Tab or the configured number of spaces instead of moving focus.
+  const handleEditorKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key !== 'Tab') return
+    event.preventDefault()
+    const target = event.currentTarget
+    const { selectionStart, selectionEnd, value } = target
+    const insert = editorSettings.insertSpaces ? ' '.repeat(editorSettings.tabSize) : '\t'
+    const next = value.slice(0, selectionStart) + insert + value.slice(selectionEnd)
+    handleCodeChange(next)
+    const caret = selectionStart + insert.length
+    requestAnimationFrame(() => {
+      target.selectionStart = caret
+      target.selectionEnd = caret
+    })
   }
 
   const handleRun = (): void => {
@@ -301,14 +319,19 @@ export default function RightPanel(): JSX.Element {
               <button disabled={workspace?.kind !== 'project'} onClick={handleNewFile}>New File</button>
               <button onClick={() => void openWorkspace('file')}>Upload File</button>
             </div>
-            <div className="code-editor">
-              <div className="code-gutter" aria-hidden="true">
-                <div style={{ transform: `translateY(${-scroll.top}px)` }}>
-                  {lineNumbers.map((line) => (
-                    <span key={line}>{line}</span>
-                  ))}
+            <div
+              className={`code-editor${editorSettings.wordWrap ? ' wrap' : ''}${editorSettings.lineNumbers ? '' : ' no-gutter'}`}
+              style={{ fontSize: editorSettings.fontSize, tabSize: editorSettings.tabSize }}
+            >
+              {editorSettings.lineNumbers && (
+                <div className="code-gutter" aria-hidden="true">
+                  <div style={{ transform: `translateY(${-scroll.top}px)` }}>
+                    {lineNumbers.map((line) => (
+                      <span key={line}>{line}</span>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="code-input-wrap">
                 <pre
                   className="code-highlight"
@@ -324,9 +347,10 @@ export default function RightPanel(): JSX.Element {
                 <textarea
                   ref={inputRef}
                   className="code-input"
-                  spellCheck={false}
+                  spellCheck={editorSettings.spellCheck}
                   value={code}
                   onChange={(e) => handleCodeChange(e.target.value)}
+                  onKeyDown={handleEditorKeyDown}
                   onScroll={handleScroll}
                 />
               </div>

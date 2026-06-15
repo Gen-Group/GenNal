@@ -8,7 +8,6 @@ export default function TitleBar(): JSX.Element {
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const panelOpen = useStore((s) => s.panelOpen)
   const togglePanel = useStore((s) => s.togglePanel)
-
   const isMac = window.api.platform === 'darwin'
 
   return (

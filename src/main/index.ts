@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain, dialog, protocol, clipboard } from 
 import { promises as fs } from 'fs'
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'path'
 import { loadModels } from './model-registry'
+import { readCliUsage } from './usage-reader'
 import {
   createSession,
   writeSession,
@@ -408,6 +409,8 @@ function createWindow(): void {
 
 function registerIpc(): void {
   ipcMain.handle('models:list', () => loadModels())
+
+  ipcMain.handle('usage:get', (_e, modelId: string) => readCliUsage(modelId))
 
   ipcMain.handle('workspace:open', async (_e, kind: WorkspaceKind): Promise<WorkspaceOpenResult | null> => {
     const options = {
