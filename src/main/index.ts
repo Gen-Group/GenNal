@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain, dialog, protocol, clipboard } from 
 import { promises as fs } from 'fs'
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'path'
 import { loadModels } from './model-registry'
+import { readCliUsage } from './usage-reader'
 import {
   createSession,
   writeSession,
@@ -365,16 +366,21 @@ async function saveClipboardImage(): Promise<AttachmentSaveResult | null> {
 }
 
 function createWindow(): void {
+  const isMac = process.platform === 'darwin'
   mainWindow = new BrowserWindow({
     width: 1480,
     height: 920,
     minWidth: 1040,
     minHeight: 680,
     show: false,
-    frame: false,
+    // On macOS keep the native window (so the traffic-light buttons show); on
+    // Windows/Linux use a fully frameless window with our own custom controls.
+    frame: isMac ? true : false,
     icon: join(__dirname, '../../build/icon.ico'),
     backgroundColor: '#0a0b10',
     titleBarStyle: 'hidden',
+    // Nudge the macOS traffic lights down so they sit centered in our title bar.
+    ...(isMac ? { trafficLightPosition: { x: 16, y: 18 } } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -402,6 +408,8 @@ function createWindow(): void {
 
 function registerIpc(): void {
   ipcMain.handle('models:list', () => loadModels())
+
+  ipcMain.handle('usage:get', (_e, modelId: string) => readCliUsage(modelId))
 
   ipcMain.handle('workspace:open', async (_e, kind: WorkspaceKind): Promise<WorkspaceOpenResult | null> => {
     const options = {

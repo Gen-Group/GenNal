@@ -33,6 +33,9 @@ export type ThemeName =
   | 'sunset'
   | 'rose'
   | 'nord'
+  | 'slate'
+  | 'graphite'
+  | 'stone'
 
 export const THEME_NAMES: ThemeName[] = [
   'dark',
@@ -42,7 +45,10 @@ export const THEME_NAMES: ThemeName[] = [
   'forest',
   'sunset',
   'rose',
-  'nord'
+  'nord',
+  'slate',
+  'graphite',
+  'stone'
 ]
 
 export interface Profile {
@@ -68,6 +74,24 @@ export interface TerminalSettings {
   cursorBlink: boolean
   scrollback: number
   focusNewSessions: boolean
+}
+
+export interface PrivacySettings {
+  telemetry: boolean
+  crashReports: boolean
+  rememberHistory: boolean
+  rememberWorkspace: boolean
+  redactSecrets: boolean
+  clearOnExit: boolean
+}
+
+export interface EditorSettings {
+  fontSize: number
+  tabSize: number
+  insertSpaces: boolean
+  wordWrap: boolean
+  lineNumbers: boolean
+  spellCheck: boolean
 }
 
 export interface ImagePreview {
@@ -97,6 +121,8 @@ interface AppState {
   generalSettings: GeneralSettings
   browserSettings: BrowserSettings
   terminalSettings: TerminalSettings
+  privacySettings: PrivacySettings
+  editorSettings: EditorSettings
   profileSetupOpen: boolean
   workspace: WorkspaceOpenResult | null
   workspaceError: string | null
@@ -124,6 +150,9 @@ interface AppState {
   setGeneralSettings: (settings: Partial<GeneralSettings>) => void
   setBrowserSettings: (settings: Partial<BrowserSettings>) => void
   setTerminalSettings: (settings: Partial<TerminalSettings>) => void
+  setPrivacySettings: (settings: Partial<PrivacySettings>) => void
+  setEditorSettings: (settings: Partial<EditorSettings>) => void
+  clearLocalData: () => void
   toggleProfileSetup: (v?: boolean) => void
   openWorkspace: (kind: WorkspaceKind) => Promise<void>
   restoreWorkspace: () => Promise<void>
@@ -270,6 +299,26 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   scrollback: 2000,
   focusNewSessions: true
 }
+const PRIVACY_STORAGE = 'gennal.privacySettings'
+// Privacy-respecting defaults: nothing leaves the device unless the user opts in.
+const DEFAULT_PRIVACY_SETTINGS: PrivacySettings = {
+  telemetry: false,
+  crashReports: false,
+  rememberHistory: true,
+  rememberWorkspace: true,
+  redactSecrets: true,
+  clearOnExit: false
+}
+const EDITOR_STORAGE = 'gennal.editorSettings'
+const EDITOR_TAB_SIZES = [2, 4, 8]
+const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
+  fontSize: 13,
+  tabSize: 2,
+  insertSpaces: true,
+  wordWrap: false,
+  lineNumbers: true,
+  spellCheck: false
+}
 
 function loadProfile(): Profile {
   try {
@@ -360,6 +409,48 @@ function loadTerminalSettings(): TerminalSettings {
   }
 }
 
+function loadPrivacySettings(): PrivacySettings {
+  try {
+    const raw = window.localStorage.getItem(PRIVACY_STORAGE)
+    if (!raw) return DEFAULT_PRIVACY_SETTINGS
+    const parsed = JSON.parse(raw) as Partial<PrivacySettings>
+    const pick = (key: keyof PrivacySettings): boolean =>
+      typeof parsed[key] === 'boolean' ? (parsed[key] as boolean) : DEFAULT_PRIVACY_SETTINGS[key]
+    return {
+      telemetry: pick('telemetry'),
+      crashReports: pick('crashReports'),
+      rememberHistory: pick('rememberHistory'),
+      rememberWorkspace: pick('rememberWorkspace'),
+      redactSecrets: pick('redactSecrets'),
+      clearOnExit: pick('clearOnExit')
+    }
+  } catch {
+    return DEFAULT_PRIVACY_SETTINGS
+  }
+}
+
+function loadEditorSettings(): EditorSettings {
+  try {
+    const raw = window.localStorage.getItem(EDITOR_STORAGE)
+    if (!raw) return DEFAULT_EDITOR_SETTINGS
+    const parsed = JSON.parse(raw) as Partial<EditorSettings>
+    const fontSize = Number(parsed.fontSize)
+    const tabSize = Number(parsed.tabSize)
+    const bool = (key: keyof EditorSettings): boolean =>
+      typeof parsed[key] === 'boolean' ? (parsed[key] as boolean) : (DEFAULT_EDITOR_SETTINGS[key] as boolean)
+    return {
+      fontSize: Number.isFinite(fontSize) ? Math.min(20, Math.max(11, fontSize)) : DEFAULT_EDITOR_SETTINGS.fontSize,
+      tabSize: EDITOR_TAB_SIZES.includes(tabSize) ? tabSize : DEFAULT_EDITOR_SETTINGS.tabSize,
+      insertSpaces: bool('insertSpaces'),
+      wordWrap: bool('wordWrap'),
+      lineNumbers: bool('lineNumbers'),
+      spellCheck: bool('spellCheck')
+    }
+  } catch {
+    return DEFAULT_EDITOR_SETTINGS
+  }
+}
+
 const TERMINAL_ACCENTS = ['#22c55e', '#2f8cff', '#7c3aed', '#f97316']
 
 function createSession(model: ModelDef, index: number, cwd?: string): Session {
@@ -395,6 +486,8 @@ export const useStore = create<AppState>((set, get) => ({
   generalSettings: loadGeneralSettings(),
   browserSettings: loadBrowserSettings(),
   terminalSettings: loadTerminalSettings(),
+  privacySettings: loadPrivacySettings(),
+  editorSettings: loadEditorSettings(),
   profileSetupOpen: loadProfile().name === '',
   workspace: null,
   workspaceError: null,
@@ -558,6 +651,69 @@ export const useStore = create<AppState>((set, get) => ({
       }
       return { terminalSettings: next }
     })
+  },
+
+  setPrivacySettings: (settings) => {
+    set((s) => {
+      const next: PrivacySettings = { ...s.privacySettings, ...settings }
+      try {
+        window.localStorage.setItem(PRIVACY_STORAGE, JSON.stringify(next))
+        // Turning off "remember" options should also drop anything already stored.
+        if (settings.rememberWorkspace === false) clearWorkspaceRef()
+      } catch {
+        /* ignore storage errors */
+      }
+      return { privacySettings: next }
+    })
+  },
+
+  setEditorSettings: (settings) => {
+    set((s) => {
+      const next: EditorSettings = {
+        ...s.editorSettings,
+        ...settings,
+        fontSize:
+          typeof settings.fontSize === 'number'
+            ? Math.min(20, Math.max(11, settings.fontSize))
+            : s.editorSettings.fontSize
+      }
+      try {
+        window.localStorage.setItem(EDITOR_STORAGE, JSON.stringify(next))
+      } catch {
+        /* ignore storage errors */
+      }
+      return { editorSettings: next }
+    })
+  },
+
+  clearLocalData: () => {
+    try {
+      // Wipe stored data (workspace refs, remote servers, task sources, history)
+      // while keeping the user's preferences (theme, profile, settings).
+      const keep = new Set([
+        'gennal.theme',
+        'gennal.profile',
+        'gennal.generalSettings',
+        'gennal.browserSettings',
+        'gennal.terminalSettings',
+        'gennal.privacySettings',
+        'gennal.editorSettings',
+        'gennal.panelSide',
+        'gennal.panelWidth',
+        'gennal.panelOpen',
+        'gennal.panelMaximized',
+        'gennal.sidebarOpen'
+      ])
+      const toRemove: string[] = []
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const key = window.localStorage.key(i)
+        if (key && key.startsWith('gennal.') && !keep.has(key)) toRemove.push(key)
+      }
+      toRemove.forEach((key) => window.localStorage.removeItem(key))
+    } catch {
+      /* ignore storage errors */
+    }
+    set({ workspace: null, workspaceError: null, imagePreview: null, runOutput: [] })
   },
 
   toggleProfileSetup: (v) => set((s) => ({ profileSetupOpen: v ?? !s.profileSetupOpen })),

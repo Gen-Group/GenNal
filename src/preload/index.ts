@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AttachmentSaveResult,
+  CliUsage,
   ModelDef,
   PtyCreatePayload,
   PtyData,
@@ -20,7 +21,12 @@ import type {
 } from '../shared/types'
 
 const api = {
+  platform: process.platform,
+  isMac: process.platform === 'darwin',
+
   listModels: (): Promise<ModelDef[]> => ipcRenderer.invoke('models:list'),
+
+  getUsage: (modelId: string): Promise<CliUsage> => ipcRenderer.invoke('usage:get', modelId),
 
   openWorkspace: (kind: WorkspaceKind): Promise<WorkspaceOpenResult | null> =>
     ipcRenderer.invoke('workspace:open', kind),

@@ -162,6 +162,9 @@ function Spark({ color }: { color: string }): JSX.Element {
 
 export default function Sidebar(): JSX.Element {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set())
+  const [systemOverviewHidden, setSystemOverviewHidden] = useState<boolean>(() => {
+    return window.localStorage.getItem('gennal:system-overview-hidden') === 'true'
+  })
   const [folderMenu, setFolderMenu] = useState<{ folder: string; x: number; y: number } | null>(null)
   const [fileMenu, setFileMenu] = useState<{ file: WorkspaceFile; x: number; y: number } | null>(null)
   const [workspaceMenu, setWorkspaceMenu] = useState<{ x: number; y: number } | null>(null)
@@ -217,6 +220,10 @@ export default function Sidebar(): JSX.Element {
       window.removeEventListener('keydown', closeAll)
     }
   }, [folderMenu, fileMenu, workspaceMenu, filterMenu])
+
+  useEffect(() => {
+    window.localStorage.setItem('gennal:system-overview-hidden', String(systemOverviewHidden))
+  }, [systemOverviewHidden])
 
   const toggleFolder = (folder: string): void => {
     setCollapsedFolders((current) => {
@@ -587,29 +594,60 @@ export default function Sidebar(): JSX.Element {
         )}
       </section>
 
-      <section className="side-sec">
-        <div className="side-head"><span>SYSTEM OVERVIEW</span></div>
-        <div className="ov-row">
-          <div>
-            <div className="ov-big">{running} Active</div>
-            <div className="ov-sub">Models</div>
-          </div>
-          <Spark color="#22c55e" />
+      <section className={`side-sec system-overview ${systemOverviewHidden ? 'hidden' : ''}`}>
+        <div className="side-head">
+          <span>SYSTEM OVERVIEW</span>
+          <button
+            className="side-head-action"
+            title={systemOverviewHidden ? 'Show system overview' : 'Hide system overview'}
+            aria-label={systemOverviewHidden ? 'Show system overview' : 'Hide system overview'}
+            aria-pressed={systemOverviewHidden}
+            onClick={() => setSystemOverviewHidden((hidden) => !hidden)}
+          >
+            {systemOverviewHidden ? (
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4z" />
+                <circle cx="8" cy="8" r="1.8" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M2 8s2.2-4 6-4c1.2 0 2.2.4 3.1 1" />
+                <path d="M14 8s-.8 1.5-2.2 2.6M9.8 11.7A6.8 6.8 0 0 1 8 12c-3.8 0-6-4-6-4s.7-1.3 2-2.4" />
+                <path d="M3 3l10 10" />
+              </svg>
+            )}
+          </button>
         </div>
-        <div className="ov-row">
-          <div>
-            <div className="ov-big">{(stats.memUsedMB / 1024).toFixed(1)} GB</div>
-            <div className="ov-sub">Memory</div>
-          </div>
-          <Spark color="#4285f4" />
-        </div>
-        <div className="ov-row">
-          <div>
-            <div className="ov-big">{stats.cpu}%</div>
-            <div className="ov-sub">CPU</div>
-          </div>
-          <Spark color="#7c5cff" />
-        </div>
+        {systemOverviewHidden ? (
+          <button className="ov-hidden-row" onClick={() => setSystemOverviewHidden(false)}>
+            <span>Overview hidden</span>
+            <span>Show</span>
+          </button>
+        ) : (
+          <>
+            <div className="ov-row">
+              <div>
+                <div className="ov-big">{running} Active</div>
+                <div className="ov-sub">Models</div>
+              </div>
+              <Spark color="#22c55e" />
+            </div>
+            <div className="ov-row">
+              <div>
+                <div className="ov-big">{(stats.memUsedMB / 1024).toFixed(1)} GB</div>
+                <div className="ov-sub">Memory</div>
+              </div>
+              <Spark color="#4285f4" />
+            </div>
+            <div className="ov-row">
+              <div>
+                <div className="ov-big">{stats.cpu}%</div>
+                <div className="ov-sub">CPU</div>
+              </div>
+              <Spark color="#7c5cff" />
+            </div>
+          </>
+        )}
       </section>
 
       <section className="side-sec quick-actions-sec">

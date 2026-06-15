@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useStore, type PanelSide, type ThemeName } from '../store'
+import UsageDetail from './UsageDetail'
 
 const THEME_OPTIONS: { id: ThemeName; label: string; hint: string }[] = [
   { id: 'dark', label: 'Dark', hint: 'Dark cockpit theme is active.' },
@@ -9,7 +10,10 @@ const THEME_OPTIONS: { id: ThemeName; label: string; hint: string }[] = [
   { id: 'forest', label: 'Forest', hint: 'Green forest theme is active.' },
   { id: 'sunset', label: 'Sunset', hint: 'Warm amber sunset theme is active.' },
   { id: 'rose', label: 'Rose', hint: 'Pink rose theme is active.' },
-  { id: 'nord', label: 'Nord', hint: 'Cool nord frost theme is active.' }
+  { id: 'nord', label: 'Nord', hint: 'Cool nord frost theme is active.' },
+  { id: 'slate', label: 'Slate', hint: 'Neutral slate-gray theme is active.' },
+  { id: 'graphite', label: 'Graphite', hint: 'Monochrome graphite theme is active.' },
+  { id: 'stone', label: 'Stone', hint: 'Warm neutral stone theme is active.' }
 ]
 
 const ICONS: Record<string, ReactNode> = {
@@ -254,6 +258,47 @@ const GROUPS: { title: string; items: SettingsItem[] }[] = [
   }
 ]
 
+type PrivacyToggleKey =
+  | 'telemetry'
+  | 'crashReports'
+  | 'rememberHistory'
+  | 'rememberWorkspace'
+  | 'redactSecrets'
+  | 'clearOnExit'
+
+const PRIVACY_TOGGLES: { key: PrivacyToggleKey; title: string; description: string }[] = [
+  {
+    key: 'telemetry',
+    title: 'Anonymous usage analytics',
+    description: 'Share anonymous, aggregated feature usage to help improve GenNal. Off by default.'
+  },
+  {
+    key: 'crashReports',
+    title: 'Crash reports',
+    description: 'Send diagnostic crash reports when GenNal stops unexpectedly. No file contents are included.'
+  },
+  {
+    key: 'redactSecrets',
+    title: 'Redact secrets in logs',
+    description: 'Mask API keys, tokens, and passwords detected in terminal output and run logs.'
+  },
+  {
+    key: 'rememberHistory',
+    title: 'Remember command history',
+    description: 'Keep recent quick commands and run history on this device between launches.'
+  },
+  {
+    key: 'rememberWorkspace',
+    title: 'Remember opened workspace',
+    description: 'Store the last opened file or project so it can be restored on the next launch.'
+  },
+  {
+    key: 'clearOnExit',
+    title: 'Clear local data on exit',
+    description: 'Wipe stored history, workspace references, and saved servers every time GenNal closes.'
+  }
+]
+
 const TASK_SOURCE_STORAGE = 'gennal.taskSources'
 
 const TASK_SOURCE_META: {
@@ -382,6 +427,12 @@ function normalizeHost(value: string): string {
   return value.trim().replace(/\s+/g, '')
 }
 
+function isValidRemoteHost(value: string): boolean {
+  if (!value) return false
+  if (/^https?:\/\/[^/\s:]+(?::\d{1,5})?(?:\/.*)?$/i.test(value)) return true
+  return /^[a-z0-9.-]+:\d{1,5}$/i.test(value)
+}
+
 export default function SettingsPanel(): JSX.Element | null {
   const open = useStore((s) => s.settingsOpen)
   const toggleSettings = useStore((s) => s.toggleSettings)
@@ -402,8 +453,14 @@ export default function SettingsPanel(): JSX.Element | null {
   const setTheme = useStore((s) => s.setTheme)
   const terminalSettings = useStore((s) => s.terminalSettings)
   const setTerminalSettings = useStore((s) => s.setTerminalSettings)
+  const privacySettings = useStore((s) => s.privacySettings)
+  const setPrivacySettings = useStore((s) => s.setPrivacySettings)
+  const editorSettings = useStore((s) => s.editorSettings)
+  const setEditorSettings = useStore((s) => s.setEditorSettings)
+  const clearLocalData = useStore((s) => s.clearLocalData)
   const models = useStore((s) => s.models)
   const sessions = useStore((s) => s.sessions)
+  const addSession = useStore((s) => s.addSession)
   const stats = useStore((s) => s.stats)
   const profile = useStore((s) => s.profile)
   const toggleProfileSetup = useStore((s) => s.toggleProfileSetup)
@@ -418,6 +475,8 @@ export default function SettingsPanel(): JSX.Element | null {
   const [servers, setServers] = useState<RemoteServer[]>(loadRemoteServers)
   const [serverDraft, setServerDraft] = useState({ name: '', host: '', token: '' })
   const [serverError, setServerError] = useState('')
+  const [usageDetailId, setUsageDetailId] = useState<string | null>(null)
+  const [dataCleared, setDataCleared] = useState(false)
 
   useEffect(() => {
     if (!priorityMenuOpen) return
@@ -479,11 +538,21 @@ export default function SettingsPanel(): JSX.Element | null {
     setServers(next)
   }
 
-  const addServer = (): void => {
+  const updateServerDraft = (field: keyof typeof serverDraft, value: string): void => {
+    setServerDraft((draft) => ({ ...draft, [field]: value }))
+    if (serverError) setServerError('')
+  }
+
+  const addServer = (event?: FormEvent<HTMLFormElement>): void => {
+    event?.preventDefault()
     const name = serverDraft.name.trim()
     const host = normalizeHost(serverDraft.host)
     if (!host) {
       setServerError('Enter a server host or URL.')
+      return
+    }
+    if (!isValidRemoteHost(host)) {
+      setServerError('Use host:port, http://host:port, or https://host:port.')
       return
     }
     if (servers.some((s) => s.host.toLowerCase() === host.toLowerCase())) {
@@ -530,6 +599,15 @@ export default function SettingsPanel(): JSX.Element | null {
   const connectedModels = usageModels.filter((m) => m.connected).length
   const totalSessions = sessions.length
   const runningSessions = sessions.filter((s) => s.status === 'running').length
+  const usageDetailModel = usageDetailId
+    ? usageModels.find((m) => m.model.id === usageDetailId)?.model ?? null
+    : null
+
+  const connectModel = (modelId: string): void => {
+    addSession(modelId)
+    setUsageDetailId(null)
+    toggleSettings(false)
+  }
 
   return (
     <div className="settings-overlay" onMouseDown={() => toggleSettings(false)}>
@@ -543,7 +621,10 @@ export default function SettingsPanel(): JSX.Element | null {
                 <button
                   key={item.id}
                   className={`settings-nav-item ${active === item.id ? 'active' : ''}`}
-                  onClick={() => setActive(item.id)}
+                  onClick={() => {
+                    setActive(item.id)
+                    setUsageDetailId(null)
+                  }}
                 >
                   <NavIcon name={item.icon} />
                   <span>{item.label}</span>
@@ -1072,23 +1153,21 @@ export default function SettingsPanel(): JSX.Element | null {
                   <h3>Add a remote server</h3>
                   <p>Run model sessions on another machine. Enter its GenNal host and an optional access token.</p>
                 </div>
-                <div className="remote-form">
+                <form className="remote-form" onSubmit={addServer}>
                   <div className="remote-form-row">
                     <input
                       aria-label="Server name"
                       placeholder="Name (e.g. Workstation)"
                       value={serverDraft.name}
                       maxLength={40}
-                      onChange={(event) => setServerDraft((d) => ({ ...d, name: event.target.value }))}
+                      onChange={(event) => updateServerDraft('name', event.target.value)}
                     />
                     <input
                       aria-label="Server host or URL"
                       placeholder="host:port or https://…"
                       value={serverDraft.host}
-                      onChange={(event) => setServerDraft((d) => ({ ...d, host: event.target.value }))}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') addServer()
-                      }}
+                      aria-invalid={Boolean(serverError)}
+                      onChange={(event) => updateServerDraft('host', event.target.value)}
                     />
                   </div>
                   <div className="remote-form-row">
@@ -1097,12 +1176,12 @@ export default function SettingsPanel(): JSX.Element | null {
                       type="password"
                       placeholder="Access token (optional)"
                       value={serverDraft.token}
-                      onChange={(event) => setServerDraft((d) => ({ ...d, token: event.target.value }))}
+                      onChange={(event) => updateServerDraft('token', event.target.value)}
                     />
-                    <button className="remote-add-btn" onClick={addServer}>Add server</button>
+                    <button className="remote-add-btn" type="submit">Add server</button>
                   </div>
                   {serverError && <p className="remote-error">{serverError}</p>}
-                </div>
+                </form>
               </div>
 
               {servers.length === 0 ? (
@@ -1151,6 +1230,14 @@ export default function SettingsPanel(): JSX.Element | null {
             </div>
           ) : active === 'usage' ? (
             <div className="settings-content usage-panel">
+              {usageDetailModel ? (
+                <UsageDetail
+                  model={usageDetailModel}
+                  onBack={() => setUsageDetailId(null)}
+                  onConnect={() => connectModel(usageDetailModel.id)}
+                />
+              ) : (
+              <>
               <div className="settings-summary-grid">
                 <div className="settings-summary">
                   <span>AI connected</span>
@@ -1193,10 +1280,26 @@ export default function SettingsPanel(): JSX.Element | null {
                       </div>
                       <p>{connected ? `${running} active session${running === 1 ? '' : 's'}` : 'Not connected'}{total > 0 ? ` · ${total} total` : ''}</p>
                     </div>
-                    <span className={`usage-badge ${connected ? 'on' : ''}`}>
-                      <span className="usage-dot" />
-                      {connected ? 'Connected' : 'Idle'}
-                    </span>
+                    <div className="usage-actions">
+                      <span className={`usage-badge ${connected ? 'on' : ''}`}>
+                        <span className="usage-dot" />
+                        {connected ? 'Connected' : 'Idle'}
+                      </span>
+                      <button
+                        className="usage-see"
+                        onClick={() => setUsageDetailId(model.id)}
+                        title={`See ${model.label} usage`}
+                      >
+                        See usage
+                      </button>
+                      <button
+                        className={`usage-connect ${connected ? 'on' : ''}`}
+                        onClick={() => connectModel(model.id)}
+                        title={connected ? `Launch another ${model.label} session` : `Connect ${model.label}`}
+                      >
+                        {connected ? 'New session' : 'Connect'}
+                      </button>
+                    </div>
                   </div>
                 ))}
                 {usageModels.length === 0 && (
@@ -1208,6 +1311,187 @@ export default function SettingsPanel(): JSX.Element | null {
               </div>
 
               <p className="remote-note">Usage reflects live sessions on this device.</p>
+              </>
+              )}
+            </div>
+          ) : active === 'privacy' ? (
+            <div className="settings-content privacy-panel">
+              <div className="settings-summary-grid">
+                <div className="settings-summary">
+                  <span>Telemetry</span>
+                  <strong>{privacySettings.telemetry ? 'On' : 'Off'}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Secret redaction</span>
+                  <strong>{privacySettings.redactSecrets ? 'On' : 'Off'}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Clear on exit</span>
+                  <strong>{privacySettings.clearOnExit ? 'On' : 'Off'}</strong>
+                </div>
+              </div>
+
+              <div className="settings-card privacy-intro-card">
+                <div>
+                  <h3>Your data stays on this device</h3>
+                  <p>
+                    GenNal runs AI models locally through their CLIs. Nothing is sent to GenNal
+                    servers unless you explicitly turn on the options below.
+                  </p>
+                </div>
+              </div>
+
+              {PRIVACY_TOGGLES.map((toggle) => {
+                const enabled = privacySettings[toggle.key]
+                return (
+                  <div className="settings-card" key={toggle.key}>
+                    <div>
+                      <h3>{toggle.title}</h3>
+                      <p>{toggle.description}</p>
+                    </div>
+                    <button
+                      className={`task-toggle ${enabled ? 'on' : ''}`}
+                      aria-pressed={enabled}
+                      aria-label={toggle.title}
+                      onClick={() => setPrivacySettings({ [toggle.key]: !enabled })}
+                    >
+                      <span />
+                    </button>
+                  </div>
+                )
+              })}
+
+              <div className="settings-card privacy-danger-card">
+                <div>
+                  <h3>Clear local data now</h3>
+                  <p>
+                    Remove stored history, workspace references, saved servers, and task sources from
+                    this device. Your theme, profile, and preferences are kept.
+                  </p>
+                  {dataCleared && <p className="privacy-cleared-note">Local data cleared.</p>}
+                </div>
+                <button
+                  className="settings-close danger"
+                  onClick={() => {
+                    clearLocalData()
+                    setDataCleared(true)
+                  }}
+                >
+                  Clear data
+                </button>
+              </div>
+
+              <p className="remote-note">Privacy preferences are stored locally on this device.</p>
+            </div>
+          ) : active === 'input' ? (
+            <div className="settings-content editor-panel">
+              <div className="settings-summary-grid">
+                <div className="settings-summary">
+                  <span>Indent</span>
+                  <strong>{editorSettings.insertSpaces ? `${editorSettings.tabSize} spaces` : 'Tabs'}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Word wrap</span>
+                  <strong>{editorSettings.wordWrap ? 'On' : 'Off'}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Font size</span>
+                  <strong>{editorSettings.fontSize}px</strong>
+                </div>
+              </div>
+
+              <div className="settings-card editor-preview-card">
+                <div>
+                  <h3>Editor preview</h3>
+                  <p>These preferences apply to the code editor in the side panel.</p>
+                </div>
+                <pre
+                  className={`editor-preview${editorSettings.wordWrap ? ' wrap' : ''}`}
+                  style={{ fontSize: editorSettings.fontSize, tabSize: editorSettings.tabSize }}
+                >
+                  {editorSettings.lineNumbers && <span className="editor-preview-gutter">1{'\n'}2{'\n'}3</span>}
+                  <span className="editor-preview-code">{`function greet(name) {\n${editorSettings.insertSpaces ? ' '.repeat(editorSettings.tabSize) : '\t'}return 'Hello, ' + name\n}`}</span>
+                </pre>
+              </div>
+
+              <div className="settings-card">
+                <div>
+                  <h3>Tab size</h3>
+                  <p>Number of spaces inserted when you press Tab.</p>
+                </div>
+                <div className="settings-grid-actions">
+                  {[2, 4, 8].map((size) => (
+                    <button
+                      key={size}
+                      className={editorSettings.tabSize === size ? 'active' : ''}
+                      onClick={() => setEditorSettings({ tabSize: size })}
+                    >
+                      {size}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div>
+                  <h3>Editor font size</h3>
+                  <p>Set the text size used in the code editor.</p>
+                </div>
+                <div className="settings-grid-actions">
+                  {[12, 13, 14, 16].map((size) => (
+                    <button
+                      key={size}
+                      className={editorSettings.fontSize === size ? 'active' : ''}
+                      onClick={() => setEditorSettings({ fontSize: size })}
+                    >
+                      {size}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-card task-options-card">
+                <div>
+                  <h3>Behavior</h3>
+                  <p>How the editor handles indentation, wrapping, and typing.</p>
+                </div>
+                <div className="task-option-list">
+                  <label className="task-check">
+                    <input
+                      type="checkbox"
+                      checked={editorSettings.insertSpaces}
+                      onChange={(event) => setEditorSettings({ insertSpaces: event.target.checked })}
+                    />
+                    <span>Insert spaces instead of tabs</span>
+                  </label>
+                  <label className="task-check">
+                    <input
+                      type="checkbox"
+                      checked={editorSettings.wordWrap}
+                      onChange={(event) => setEditorSettings({ wordWrap: event.target.checked })}
+                    />
+                    <span>Wrap long lines</span>
+                  </label>
+                  <label className="task-check">
+                    <input
+                      type="checkbox"
+                      checked={editorSettings.lineNumbers}
+                      onChange={(event) => setEditorSettings({ lineNumbers: event.target.checked })}
+                    />
+                    <span>Show line numbers</span>
+                  </label>
+                  <label className="task-check">
+                    <input
+                      type="checkbox"
+                      checked={editorSettings.spellCheck}
+                      onChange={(event) => setEditorSettings({ spellCheck: event.target.checked })}
+                    />
+                    <span>Check spelling while typing</span>
+                  </label>
+                </div>
+              </div>
+
+              <p className="remote-note">Editor preferences are stored locally on this device.</p>
             </div>
           ) : (
             <div className="settings-placeholder">

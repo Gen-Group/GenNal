@@ -8,23 +8,24 @@ export default function TitleBar(): JSX.Element {
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const panelOpen = useStore((s) => s.panelOpen)
   const togglePanel = useStore((s) => s.togglePanel)
+  const isMac = window.api.isMac
 
   return (
-    <header className="titlebar">
+    <header className={`titlebar${isMac ? ' is-mac' : ''}`}>
       <div className="tb-left drag">
         <img className="brand-mark" src={logoUrl} alt="GenNal logo" />
         <span className="brand-name">GenNal</span>
         <span className="brand-pill">Pro</span>
       </div>
 
-      <div className="tb-center no-drag">
+      <div className="tb-center">
         <button className="quick-cmd" onClick={() => togglePalette(true)}>
           <span>Quick command</span>
           <kbd>Ctrl K</kbd>
         </button>
       </div>
 
-      <div className="tb-right no-drag">
+      <div className="tb-right">
         <button
           className={`icon-btn sidebar-toggle ${sidebarOpen ? 'active' : ''}`}
           title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
@@ -55,6 +56,7 @@ export default function TitleBar(): JSX.Element {
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
         </button>
+        {!isMac && (
         <div className="win-ctrls">
           <button className="win-btn" title="Minimize" aria-label="Minimize" onClick={() => window.api.win.minimize()}>
             <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
@@ -72,6 +74,7 @@ export default function TitleBar(): JSX.Element {
             </svg>
           </button>
         </div>
+        )}
       </div>
     </header>
   )
