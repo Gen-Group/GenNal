@@ -10,7 +10,7 @@ import {
 } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { useStore, type Session } from '../store'
+import { useStore, scrollbackLines, type Session } from '../store'
 
 function isTerminalReport(data: string): boolean {
   return /^\x1b\[\?1;2c$/.test(data) || /^\x1b\[\?6c$/.test(data) || /^\x1b\[\d+;\d+R$/.test(data)
@@ -64,10 +64,6 @@ function keyToPtyData(e: KeyLikeEvent): string | null {
   }
 }
 
-function hasImageItem(items: DataTransferItemList): boolean {
-  return Array.from(items).some((item) => item.kind === 'file' && item.type.startsWith('image/'))
-}
-
 function isImagePath(path: string): boolean {
   return /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i.test(path)
 }
@@ -81,6 +77,11 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
   const termRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const noticeTimerRef = useRef<number | null>(null)
+  // The terminal effect (keyed by session.id) needs a stable hook into the
+  // latest paste handler, and a guard so a single Ctrl+V isn't pasted twice when
+  // both the key handler and a DOM paste event fire.
+  const pasteRef = useRef<() => void>(() => {})
+  const lastPasteRef = useRef(0)
   const [attachmentNotice, setAttachmentNotice] = useState<AttachmentNotice | null>(null)
   const setStatus = useStore((s) => s.setStatus)
   const removeSession = useStore((s) => s.removeSession)
@@ -92,13 +93,21 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
   const terminalSettings = useStore((s) => s.terminalSettings)
   const terminalNumber = sessions.findIndex((s) => s.id === session.id) + 1
 
+  // The terminal effect is keyed by session.id, so it can't see later setting
+  // changes; mirror the latest settings in a ref the event handlers read.
+  const settingsRef = useRef(terminalSettings)
+  useEffect(() => {
+    settingsRef.current = terminalSettings
+  }, [terminalSettings])
+
   useEffect(() => {
     if (!termRef.current) return
     const term = new Terminal({
       fontFamily: terminalSettings.fontFamily,
       fontSize: terminalSettings.fontSize,
       cursorBlink: terminalSettings.cursorBlink,
-      scrollback: terminalSettings.scrollback,
+      scrollback: scrollbackLines(terminalSettings),
+      wordSeparator: terminalSettings.wordSeparators,
       theme: {
         background: '#0c0e16',
         foreground: '#d7dae6',
@@ -122,16 +131,30 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
       return true
     }
 
-    // xterm has no built-in copy: wire Ctrl/Cmd+C (when text is selected) and
-    // Ctrl/Cmd+Shift+C to copy the selection instead of sending it to the pty.
+    // xterm has no built-in copy/paste: wire Ctrl/Cmd+C (when text is selected)
+    // to copy, and Ctrl/Cmd+V (and Ctrl/Cmd+Shift+V) to paste. Without this, V
+    // falls through to xterm and the raw control char ^V (0x16) is sent to the
+    // pty instead of pasting — which is why nothing could be pasted.
     term.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown') return true
       const mod = window.api.isMac ? event.metaKey : event.ctrlKey
       const isC = event.key === 'c' || event.key === 'C'
+      const isV = event.key === 'v' || event.key === 'V'
       if (mod && isC && (event.shiftKey || term.hasSelection())) {
         if (copySelection()) return false
       }
+      if (mod && isV) {
+        pasteRef.current()
+        return false
+      }
       return true
+    })
+
+    // Copy on select: mirror the selection to the clipboard as it changes.
+    const onSelection = term.onSelectionChange(() => {
+      if (!settingsRef.current.copyOnSelect) return
+      const selection = term.getSelection()
+      if (selection) window.api.writeClipboardText(selection)
     })
 
     const { id, command, cwd } = session
@@ -166,6 +189,7 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
       offData()
       offExit()
       onInput.dispose()
+      onSelection.dispose()
       window.api.ptyKill(id)
       term.dispose()
       terminalRef.current = null
@@ -179,7 +203,8 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
     term.options.fontFamily = terminalSettings.fontFamily
     term.options.fontSize = terminalSettings.fontSize
     term.options.cursorBlink = terminalSettings.cursorBlink
-    term.options.scrollback = terminalSettings.scrollback
+    term.options.scrollback = scrollbackLines(terminalSettings)
+    term.options.wordSeparator = terminalSettings.wordSeparators
   }, [terminalSettings])
 
   useEffect(() => {
@@ -216,6 +241,12 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
   }
 
   const onPanePaste = (e: ReactClipboardEvent<HTMLDivElement>): void => {
+    // The Ctrl/Cmd+V keybinding may have just handled this same paste.
+    if (!claimPaste()) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
     const text = e.clipboardData.getData('text/plain')
     if (text) {
       e.preventDefault()
@@ -226,16 +257,15 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
       return
     }
 
-    // When Chromium flags the clipboard image as a DOM file item, cancel the
-    // default paste so an empty/garbled paste doesn't reach the shell.
-    if (hasImageItem(e.clipboardData.items)) {
-      e.preventDefault()
-      e.stopPropagation()
-    }
-    // Always consult the OS clipboard via main: on Windows a copied screenshot
-    // (PrintScreen / Snipping Tool) is a raw bitmap that the paste event often
-    // doesn't expose as a file item. saveClipboardImage() returns null when
-    // there's no image, so plain-text pastes fall through to the terminal.
+    // No plain text on the clipboard, so the only useful payload is an image.
+    // Cancel the default paste unconditionally — otherwise a Windows screenshot
+    // (PrintScreen / Snipping Tool) is a raw bitmap that Chromium doesn't surface
+    // as a DOM file item, so it leaks through to the terminal where the running
+    // CLI tries to paste it itself and fails with "no image on clipboard". GenNal
+    // attaches the image via the OS clipboard below; saveClipboardImage() returns
+    // null when there's genuinely nothing to attach.
+    e.preventDefault()
+    e.stopPropagation()
     void attachClipboardImage()
   }
 
@@ -249,6 +279,37 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
       showAttachmentNotice({ name: 'Unable to attach clipboard image', src: '' })
     }
   }
+
+  // One paste may arrive via the keyboard handler and/or a DOM paste event;
+  // collapse near-simultaneous calls so the clipboard isn't pasted twice.
+  const claimPaste = (): boolean => {
+    const now = Date.now()
+    if (now - lastPasteRef.current < 120) return false
+    lastPasteRef.current = now
+    return true
+  }
+
+  // Explicit paste used by the Ctrl/Cmd+V keybinding: drop clipboard text into
+  // the terminal, or — when there's only an image — save it and type its path so
+  // CLIs like Claude Code can read it.
+  const pasteIntoTerminal = (): void => {
+    if (!claimPaste()) return
+    setActive(session.id)
+    void (async () => {
+      try {
+        const text = await window.api.readClipboardText()
+        if (text) {
+          terminalRef.current?.paste(text)
+          terminalRef.current?.focus()
+          return
+        }
+      } catch {
+        /* fall through to image attach */
+      }
+      await attachClipboardImage()
+    })()
+  }
+  pasteRef.current = pasteIntoTerminal
 
   const onPaneDrop = (e: ReactDragEvent<HTMLDivElement>): void => {
     const file = Array.from(e.dataTransfer.files).find((entry) => {
@@ -291,13 +352,34 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
     action()
   }
 
+  const onPaneMouseEnter = (): void => {
+    if (settingsRef.current.focusFollowsMouse && activeId !== session.id) {
+      setActive(session.id)
+      terminalRef.current?.focus()
+    }
+  }
+
+  const onPaneContextMenu = (e: MouseEvent<HTMLDivElement>): void => {
+    // Ctrl+right-click falls through to the native Cut/Copy/Paste menu.
+    if (!settingsRef.current.rightClickPaste || e.ctrlKey) return
+    e.preventDefault()
+    window.api.suppressNextContextMenu()
+    setActive(session.id)
+    void window.api.readClipboardText().then((text) => {
+      if (text) window.api.ptyInput(session.id, text)
+    })
+    terminalRef.current?.focus()
+  }
+
   return (
     <div
       ref={paneRef}
       className={`pane ${activeId === session.id ? 'focused' : ''}`}
-      style={{ borderColor: `${session.accent}88`, '--pane-accent': session.accent } as CSSProperties}
+      style={{ '--pane-accent': session.accent } as CSSProperties}
       onMouseDown={focusPane}
       onClick={focusPane}
+      onMouseEnter={onPaneMouseEnter}
+      onContextMenu={onPaneContextMenu}
       onKeyDown={onPaneKeyDown}
       onPasteCapture={(e) => void onPanePaste(e)}
       onDragOver={onPaneDragOver}

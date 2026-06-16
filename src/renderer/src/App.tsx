@@ -4,6 +4,9 @@ import TitleBar from './components/TitleBar'
 import Sidebar from './components/Sidebar'
 import LayoutToolbar from './components/LayoutToolbar'
 import PaneGrid from './components/PaneGrid'
+import TasksPanel from './components/TasksPanel'
+import AutomationsPanel from './components/AutomationsPanel'
+import SessionHistoryPanel from './components/SessionHistoryPanel'
 import RightPanel from './components/RightPanel'
 import StatusBar from './components/StatusBar'
 import CommandPalette from './components/CommandPalette'
@@ -25,6 +28,10 @@ export default function App(): JSX.Element {
   const panelOpen = useStore((s) => s.panelOpen)
   const panelMaximized = useStore((s) => s.panelMaximized)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
+  const tasksOpen = useStore((s) => s.tasksOpen)
+  const automationsOpen = useStore((s) => s.automationsOpen)
+  const historyOpen = useStore((s) => s.historyOpen)
+  const tickAutomations = useStore((s) => s.tickAutomations)
   const bodyClasses = [
     'body',
     `panel-${panelSide}`,
@@ -50,6 +57,13 @@ export default function App(): JSX.Element {
   useEffect(() => {
     if (restoreWorkspaceOnLaunch) void restoreWorkspace()
   }, [restoreWorkspace, restoreWorkspaceOnLaunch])
+
+  // Background scheduler: fire any due automations while the app is open.
+  useEffect(() => {
+    tickAutomations()
+    const timer = window.setInterval(() => tickAutomations(), 30_000)
+    return () => window.clearInterval(timer)
+  }, [tickAutomations])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -77,8 +91,18 @@ export default function App(): JSX.Element {
         {sidebarOpen && <Sidebar />}
         {panelSide === 'left' && panelOpen && <RightPanel />}
         <main className="center">
-          <LayoutToolbar />
-          <PaneGrid />
+          {tasksOpen ? (
+            <TasksPanel />
+          ) : automationsOpen ? (
+            <AutomationsPanel />
+          ) : historyOpen ? (
+            <SessionHistoryPanel />
+          ) : (
+            <>
+              <LayoutToolbar />
+              <PaneGrid />
+            </>
+          )}
         </main>
         {panelSide === 'right' && panelOpen && <RightPanel />}
       </div>

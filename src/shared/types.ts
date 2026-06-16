@@ -14,6 +14,8 @@ export interface PtyCreatePayload {
   id: string
   cwd?: string
   command?: string
+  /** Plain-shell panes (Windows): 'powershell' | 'cmd' | 'gitbash' | 'wsl'. */
+  shell?: string
 }
 
 export interface PtyData {
@@ -194,4 +196,80 @@ export interface ChatExit {
   id: string
   code: number | null
   error?: string
+}
+
+export type GithubWorkKind = 'issue' | 'pr'
+
+export interface GithubAssignee {
+  login: string
+  avatarUrl: string
+}
+
+export interface GithubWorkItem {
+  id: number
+  number: number
+  title: string
+  url: string
+  state: 'open' | 'closed'
+  kind: GithubWorkKind
+  /** PR was merged (issues are always false). */
+  merged: boolean
+  /** PR is a draft. */
+  draft: boolean
+  assignees: GithubAssignee[]
+  updatedAt: string
+  repo: string
+  author?: string
+}
+
+export interface GithubFetchPayload {
+  /** "owner/name" derived from the workspace git remote. */
+  repo: string
+  /** Search qualifier string, e.g. "is:issue is:open assignee:@me". */
+  query: string
+  /** Personal access token; falls back to GITHUB_TOKEN/GH_TOKEN in main. */
+  token?: string
+}
+
+export interface GithubWorkResult {
+  items: GithubWorkItem[]
+  total: number
+  /** "owner/name" actually queried. */
+  repo: string
+  /** True when the request was authenticated with a token. */
+  authenticated: boolean
+}
+
+/** Which CLI wrote a session log. */
+export type AgentSessionAgent = 'codex' | 'claude'
+
+/** One past agent CLI conversation, summarized from its on-disk log. */
+export interface AgentSessionSummary {
+  /** Stable id (session uuid where available, else the file path). */
+  id: string
+  agent: AgentSessionAgent
+  /** First human prompt of the session, trimmed for display. */
+  title: string
+  /** Model that ran the session, e.g. "claude-opus-4-8" or "gpt-5.1-codex-max". */
+  model?: string
+  /** Working directory the session ran in. */
+  cwd?: string
+  /** Git branch recorded with the session, if any. */
+  branch?: string
+  /** Count of user + assistant turns. */
+  messageCount: number
+  /** Total tokens attributed to the session (cumulative, incl. cache). */
+  tokens: number
+  /** ISO timestamp of the latest activity in the session. */
+  updatedAt: string
+  /** Absolute path to the source log file. */
+  filePath: string
+}
+
+export interface AgentSessionHistory {
+  sessions: AgentSessionSummary[]
+  /** Number of session files considered before the recency cap. */
+  scanned: number
+  /** The cap applied to the most-recent files (e.g. 500). */
+  recent: number
 }

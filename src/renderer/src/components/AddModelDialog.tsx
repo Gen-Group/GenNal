@@ -64,6 +64,11 @@ export default function AddModelDialog(): JSX.Element | null {
             placeholder="e.g. ollama run llama3"
             maxLength={200}
           />
+          <small className="profile-hint">
+            Your prompt is added at the end of the command. If the CLI needs it elsewhere
+            (e.g. after a subcommand), put <code>{'{prompt}'}</code> where it should go —
+            e.g. <code>kiro-cli chat {'{prompt}'}</code>.
+          </small>
         </label>
 
         <label className="profile-field">

@@ -1,5 +1,6 @@
 import * as pty from 'node-pty'
 import { homedir } from 'os'
+import { existsSync } from 'fs'
 import type { BrowserWindow } from 'electron'
 import type { PtyCreatePayload } from '../shared/types'
 
@@ -17,6 +18,30 @@ const SHELL = isWindows
 // PATH and never launch, and the shell shows no themed prompt.
 const SHELL_ARGS = isWindows ? [] : ['-l', '-i']
 
+// Resolve a Windows-shell preference to an executable + args. Falls back to the
+// default shell on non-Windows or unknown values; missing binaries (e.g. Git
+// Bash / WSL not installed) surface as a normal pty exit the renderer reports.
+function resolveShell(shell?: string): { file: string; args: string[] } {
+  if (!isWindows || !shell || shell === 'powershell') return { file: SHELL, args: SHELL_ARGS }
+  switch (shell) {
+    case 'cmd':
+      return { file: 'cmd.exe', args: [] }
+    case 'wsl':
+      return { file: 'wsl.exe', args: [] }
+    case 'gitbash': {
+      const candidates = [
+        `${process.env.ProgramFiles ?? 'C:\\Program Files'}\\Git\\bin\\bash.exe`,
+        `${process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)'}\\Git\\bin\\bash.exe`,
+        `${process.env.LOCALAPPDATA ?? ''}\\Programs\\Git\\bin\\bash.exe`
+      ]
+      const found = candidates.find((p) => p && existsSync(p))
+      return { file: found ?? 'bash.exe', args: ['-i', '-l'] }
+    }
+    default:
+      return { file: SHELL, args: SHELL_ARGS }
+  }
+}
+
 interface Session {
   proc: pty.IPty
 }
@@ -24,14 +49,15 @@ interface Session {
 const sessions = new Map<string, Session>()
 
 export function createSession(win: BrowserWindow, payload: PtyCreatePayload): void {
-  const { id, cwd, command } = payload
+  const { id, cwd, command, shell } = payload
   if (sessions.has(id)) return
 
   const env = { ...(process.env as Record<string, string>) }
+  const { file: shellFile, args: shellArgs } = resolveShell(shell)
 
   let proc: pty.IPty
   try {
-    proc = pty.spawn(SHELL, SHELL_ARGS, {
+    proc = pty.spawn(shellFile, shellArgs, {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,

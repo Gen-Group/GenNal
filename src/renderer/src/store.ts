@@ -69,12 +69,53 @@ export interface BrowserSettings {
   attachWorkspaceContext: boolean
 }
 
+export type WindowsShell = 'powershell' | 'cmd' | 'gitbash' | 'wsl'
+export type GpuAcceleration = 'auto' | 'on' | 'off'
+export type SetupScriptLocation = 'newtab' | 'vertical' | 'horizontal'
+export type PowerShellVersion = 'auto' | 'windows' | 'pwsh7'
+
 export interface TerminalSettings {
   fontFamily: string
   fontSize: number
   cursorBlink: boolean
   scrollback: number
   focusNewSessions: boolean
+  /** Default shell for new plain-shell terminal panes (Windows). */
+  windowsShell: WindowsShell
+  gpuAcceleration: GpuAcceleration
+  /** Right-click pastes the clipboard (Ctrl+right-click opens the menu). */
+  rightClickPaste: boolean
+  /** Hovering a terminal pane activates it. */
+  focusFollowsMouse: boolean
+  /** Copy terminal selections to the clipboard automatically. */
+  copyOnSelect: boolean
+  /** Allow programs to write the clipboard via OSC 52. */
+  osc52: boolean
+  setupScriptLocation: SetupScriptLocation
+  /** Scrollback buffer size in MB (drives the xterm line buffer). */
+  scrollbackMB: number
+  /** Characters treated as word boundaries for double-click selection. */
+  wordSeparators: string
+  powershellVersion: PowerShellVersion
+}
+
+/** xterm scrollback is line-based; derive a line cap from the MB preference. */
+export function scrollbackLines(s: TerminalSettings): number {
+  return Math.min(500_000, Math.max(1000, Math.round((s.scrollbackMB || 10) * 1000)))
+}
+
+/** Resolve the OS shell command for a Windows-shell preference (renderer side). */
+export function windowsShellCommand(shell: WindowsShell): string {
+  switch (shell) {
+    case 'cmd':
+      return 'cmd'
+    case 'gitbash':
+      return 'gitbash'
+    case 'wsl':
+      return 'wsl'
+    default:
+      return 'powershell'
+  }
 }
 
 export interface PrivacySettings {
@@ -102,6 +143,12 @@ export interface ImagePreview {
   size: number
 }
 
+/** A project folder the user has opened, kept so it can be reopened quickly. */
+export interface RecentProject {
+  path: string
+  name: string
+}
+
 export interface ApplyCodeResult {
   ok: boolean
   message: string
@@ -121,6 +168,86 @@ export interface ChatHistoryEntry {
   messages: ChatHistoryMessage[]
 }
 
+export type AutomationSchedule = 'hourly' | 'daily' | 'weekday' | 'weekly'
+
+export const AUTOMATION_SCHEDULE_LABELS: Record<AutomationSchedule, string> = {
+  hourly: 'Every hour',
+  daily: 'Every day',
+  weekday: 'Every weekday',
+  weekly: 'Every week'
+}
+
+export interface Automation {
+  id: string
+  name: string
+  category: string
+  description: string
+  prompt: string
+  modelId: string
+  schedule: AutomationSchedule
+  enabled: boolean
+  createdAt: string
+  lastRunAt?: string
+  /** Epoch ms of the next scheduled fire. */
+  nextRunAt?: number
+}
+
+export type AutomationRunStatus = 'running' | 'success' | 'error'
+
+export interface AutomationRun {
+  id: string
+  automationId: string
+  startedAt: string
+  finishedAt?: string
+  status: AutomationRunStatus
+  trigger: 'manual' | 'schedule'
+  output: string
+  error?: string
+}
+
+export interface AutomationTemplate {
+  category: string
+  name: string
+  description: string
+  schedule: AutomationSchedule
+  prompt: string
+}
+
+export const AUTOMATION_TEMPLATES: AutomationTemplate[] = [
+  {
+    category: 'REPO HEALTH',
+    name: 'Weekday repo audit',
+    description: 'Check dependencies, failing tests, and risky open changes each weekday.',
+    schedule: 'weekday',
+    prompt:
+      "Audit this repository's health. Check for outdated or vulnerable dependencies, failing or flaky tests, and risky uncommitted or open changes. Summarize the findings and the most important actions to take."
+  },
+  {
+    category: 'RELEASE PREP',
+    name: 'Release readiness',
+    description: 'Prepare a weekly release risk summary from the current project state.',
+    schedule: 'weekly',
+    prompt:
+      'Review the current project state and prepare a release readiness summary: highlight risks, incomplete work, recent regressions, and give a clear go / no-go recommendation with reasons.'
+  },
+  {
+    category: 'RECURRING REVIEW',
+    name: 'Daily change review',
+    description: 'Scan recent work and call out correctness, UX, and test coverage risks.',
+    schedule: 'daily',
+    prompt:
+      'Review the most recent changes in this project. Call out likely correctness bugs, UX problems, and test-coverage gaps. Be concise and specific, and reference files where possible.'
+  },
+  {
+    category: 'MAINTENANCE',
+    name: 'Hourly queue check',
+    description: 'Look for stuck work, stale generated files, and failed local validation.',
+    schedule: 'hourly',
+    prompt:
+      'Check this project for stuck or stale work: leftover generated files, failed local validation, and anything that looks abandoned or half-finished. Report what needs cleanup and why.'
+  }
+]
+
 interface AppState {
   models: ModelDef[]
   sessions: Session[]
@@ -138,6 +265,12 @@ interface AppState {
   paletteOpen: boolean
   settingsOpen: boolean
   addModelOpen: boolean
+  tasksOpen: boolean
+  automationsOpen: boolean
+  historyOpen: boolean
+  githubToken: string
+  automations: Automation[]
+  automationRuns: AutomationRun[]
   theme: ThemeName
   profile: Profile
   generalSettings: GeneralSettings
@@ -148,6 +281,7 @@ interface AppState {
   profileSetupOpen: boolean
   workspace: WorkspaceOpenResult | null
   workspaceError: string | null
+  recentProjects: RecentProject[]
   imagePreview: ImagePreview | null
   runOutput: RunOutput[]
   running: boolean
@@ -172,6 +306,16 @@ interface AppState {
   setStats: (s: SystemStats) => void
   togglePalette: (v?: boolean) => void
   toggleSettings: (v?: boolean) => void
+  toggleTasks: (v?: boolean) => void
+  toggleAutomations: (v?: boolean) => void
+  toggleHistory: (v?: boolean) => void
+  setGithubToken: (token: string) => void
+  addAutomationFromTemplate: (template: AutomationTemplate) => string
+  addBlankAutomation: () => string
+  updateAutomation: (id: string, patch: Partial<Automation>) => void
+  removeAutomation: (id: string) => void
+  runAutomation: (id: string, trigger?: AutomationRun['trigger']) => void
+  tickAutomations: () => void
   setTheme: (theme: ThemeName) => void
   setProfile: (profile: Profile) => void
   setGeneralSettings: (settings: Partial<GeneralSettings>) => void
@@ -184,6 +328,8 @@ interface AppState {
   clearChatHistory: () => void
   toggleProfileSetup: (v?: boolean) => void
   openWorkspace: (kind: WorkspaceKind) => Promise<void>
+  openProject: (path: string) => Promise<void>
+  removeRecentProject: (path: string) => void
   restoreWorkspace: () => Promise<void>
   clearWorkspace: () => void
   openWorkspaceFile: (file: WorkspaceFile) => Promise<void>
@@ -301,12 +447,176 @@ function saveWorkspaceRef(workspace: WorkspaceOpenResult): void {
   }
 }
 
+const RECENT_PROJECTS_STORAGE = 'gennal.recentProjects'
+const MAX_RECENT_PROJECTS = 12
+
+function loadRecentProjects(): RecentProject[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_PROJECTS_STORAGE)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as Partial<RecentProject>[]
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((p) => typeof p?.path === 'string' && p.path)
+      .map((p) => ({ path: p.path as string, name: (p.name as string) || (p.path as string) }))
+      .slice(0, MAX_RECENT_PROJECTS)
+  } catch {
+    return []
+  }
+}
+
+function saveRecentProjects(projects: RecentProject[]): void {
+  try {
+    window.localStorage.setItem(RECENT_PROJECTS_STORAGE, JSON.stringify(projects.slice(0, MAX_RECENT_PROJECTS)))
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+/** Move/insert a project to the front of the recents list (dedupe by path). */
+function withProjectRemembered(projects: RecentProject[], entry: RecentProject): RecentProject[] {
+  const key = entry.path.toLowerCase()
+  const rest = projects.filter((p) => p.path.toLowerCase() !== key)
+  return [entry, ...rest].slice(0, MAX_RECENT_PROJECTS)
+}
+
+/** Record a freshly-opened project in the recents list (privacy-gated). */
+function rememberProject(
+  set: (partial: Partial<AppState>) => void,
+  get: () => AppState,
+  workspace: WorkspaceOpenResult
+): void {
+  if (workspace.kind !== 'project') return
+  if (!get().privacySettings.rememberWorkspace) return
+  const recentProjects = withProjectRemembered(get().recentProjects, {
+    path: workspace.path,
+    name: workspace.name
+  })
+  saveRecentProjects(recentProjects)
+  set({ recentProjects })
+}
+
 function clearWorkspaceRef(): void {
   try {
     window.localStorage.removeItem(WORKSPACE_STORAGE)
   } catch {
     /* ignore storage errors */
   }
+}
+
+const GITHUB_TOKEN_STORAGE = 'gennal.githubToken'
+
+function loadGithubToken(): string {
+  try {
+    return window.localStorage.getItem(GITHUB_TOKEN_STORAGE) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+const AUTOMATIONS_STORAGE = 'gennal.automations'
+const AUTOMATION_RUNS_STORAGE = 'gennal.automationRuns'
+const HOUR_MS = 3_600_000
+const DAY_MS = 24 * HOUR_MS
+
+/** Next fire time (epoch ms) for a schedule, measured from `from`. */
+function computeNextRun(schedule: AutomationSchedule, from: number = Date.now()): number {
+  if (schedule === 'hourly') return from + HOUR_MS
+  if (schedule === 'weekly') return from + 7 * DAY_MS
+  let next = from + DAY_MS
+  if (schedule === 'weekday') {
+    const day = new Date(next).getDay()
+    if (day === 6) next += 2 * DAY_MS // Saturday → Monday
+    else if (day === 0) next += DAY_MS // Sunday → Monday
+  }
+  return next
+}
+
+function loadAutomations(): Automation[] {
+  try {
+    const raw = window.localStorage.getItem(AUTOMATIONS_STORAGE)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as Automation[]
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function saveAutomations(automations: Automation[]): void {
+  try {
+    window.localStorage.setItem(AUTOMATIONS_STORAGE, JSON.stringify(automations))
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+function loadAutomationRuns(): AutomationRun[] {
+  try {
+    const raw = window.localStorage.getItem(AUTOMATION_RUNS_STORAGE)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as AutomationRun[]
+    if (!Array.isArray(parsed)) return []
+    // A run still marked "running" from a previous session never finished.
+    return parsed.map((r) =>
+      r.status === 'running'
+        ? { ...r, status: 'error', error: 'Interrupted (app closed during run).', finishedAt: r.startedAt }
+        : r
+    )
+  } catch {
+    return []
+  }
+}
+
+function saveAutomationRuns(runs: AutomationRun[]): void {
+  try {
+    window.localStorage.setItem(AUTOMATION_RUNS_STORAGE, JSON.stringify(runs))
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+function uidPrefixed(prefix: string): string {
+  return prefix + Math.random().toString(36).slice(2, 10)
+}
+
+// Runs the scheduler triggers/manual runs both stream model output back over the
+// chat IPC bridge, keyed by the run id. We bind the listeners once, lazily, the
+// first time an automation actually runs.
+const activeAutomationRuns = new Set<string>()
+let automationListenersBound = false
+
+function bindAutomationListeners(
+  set: (fn: (s: AppState) => Partial<AppState>) => void,
+  get: () => AppState
+): void {
+  if (automationListenersBound) return
+  automationListenersBound = true
+  window.api.onChatData((d) => {
+    if (!activeAutomationRuns.has(d.id) || d.stream !== 'stdout') return
+    set((s) => ({
+      automationRuns: s.automationRuns.map((r) =>
+        r.id === d.id ? { ...r, output: r.output + d.chunk } : r
+      )
+    }))
+  })
+  window.api.onChatExit((e) => {
+    if (!activeAutomationRuns.has(e.id)) return
+    activeAutomationRuns.delete(e.id)
+    set((s) => ({
+      automationRuns: s.automationRuns.map((r) =>
+        r.id === e.id
+          ? {
+              ...r,
+              status: e.error ? 'error' : 'success',
+              error: e.error,
+              finishedAt: new Date().toISOString()
+            }
+          : r
+      )
+    }))
+    saveAutomationRuns(get().automationRuns)
+  })
 }
 
 const EMPTY_PROFILE: Profile = { name: '', role: '', avatar: '' }
@@ -327,7 +637,17 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   fontSize: 12.5,
   cursorBlink: true,
   scrollback: 2000,
-  focusNewSessions: true
+  focusNewSessions: true,
+  windowsShell: 'powershell',
+  gpuAcceleration: 'auto',
+  rightClickPaste: true,
+  focusFollowsMouse: false,
+  copyOnSelect: false,
+  osc52: false,
+  setupScriptLocation: 'newtab',
+  scrollbackMB: 10,
+  wordSeparators: " ()[]{}',\"`",
+  powershellVersion: 'auto'
 }
 const PRIVACY_STORAGE = 'gennal.privacySettings'
 // Privacy-respecting defaults: nothing leaves the device unless the user opts in.
@@ -412,6 +732,14 @@ function loadBrowserSettings(): BrowserSettings {
   }
 }
 
+function oneOf<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (options as readonly string[]).includes(value) ? (value as T) : fallback
+}
+
+function bool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
 function loadTerminalSettings(): TerminalSettings {
   try {
     const raw = window.localStorage.getItem(TERMINAL_STORAGE)
@@ -433,7 +761,23 @@ function loadTerminalSettings(): TerminalSettings {
       focusNewSessions:
         typeof parsed.focusNewSessions === 'boolean'
           ? parsed.focusNewSessions
-          : DEFAULT_TERMINAL_SETTINGS.focusNewSessions
+          : DEFAULT_TERMINAL_SETTINGS.focusNewSessions,
+      windowsShell: oneOf(parsed.windowsShell, ['powershell', 'cmd', 'gitbash', 'wsl'], 'powershell'),
+      gpuAcceleration: oneOf(parsed.gpuAcceleration, ['auto', 'on', 'off'], 'auto'),
+      rightClickPaste: bool(parsed.rightClickPaste, DEFAULT_TERMINAL_SETTINGS.rightClickPaste),
+      focusFollowsMouse: bool(parsed.focusFollowsMouse, DEFAULT_TERMINAL_SETTINGS.focusFollowsMouse),
+      copyOnSelect: bool(parsed.copyOnSelect, DEFAULT_TERMINAL_SETTINGS.copyOnSelect),
+      osc52: bool(parsed.osc52, DEFAULT_TERMINAL_SETTINGS.osc52),
+      setupScriptLocation: oneOf(parsed.setupScriptLocation, ['newtab', 'vertical', 'horizontal'], 'newtab'),
+      scrollbackMB:
+        typeof parsed.scrollbackMB === 'number' && parsed.scrollbackMB > 0 && parsed.scrollbackMB <= 2000
+          ? parsed.scrollbackMB
+          : DEFAULT_TERMINAL_SETTINGS.scrollbackMB,
+      wordSeparators:
+        typeof parsed.wordSeparators === 'string' && parsed.wordSeparators.length > 0
+          ? parsed.wordSeparators
+          : DEFAULT_TERMINAL_SETTINGS.wordSeparators,
+      powershellVersion: oneOf(parsed.powershellVersion, ['auto', 'windows', 'pwsh7'], 'auto')
     }
   } catch {
     return DEFAULT_TERMINAL_SETTINGS
@@ -558,6 +902,12 @@ export const useStore = create<AppState>((set, get) => ({
   paletteOpen: false,
   settingsOpen: false,
   addModelOpen: false,
+  tasksOpen: false,
+  automationsOpen: false,
+  historyOpen: false,
+  githubToken: loadGithubToken(),
+  automations: loadAutomations(),
+  automationRuns: loadAutomationRuns(),
   theme: INITIAL_THEME,
   profile: loadProfile(),
   generalSettings: loadGeneralSettings(),
@@ -568,6 +918,7 @@ export const useStore = create<AppState>((set, get) => ({
   profileSetupOpen: loadProfile().name === '',
   workspace: null,
   workspaceError: null,
+  recentProjects: loadRecentProjects(),
   imagePreview: null,
   runOutput: [],
   running: false,
@@ -697,6 +1048,153 @@ export const useStore = create<AppState>((set, get) => ({
   setStats: (stats) => set({ stats }),
   togglePalette: (v) => set((s) => ({ paletteOpen: v ?? !s.paletteOpen })),
   toggleSettings: (v) => set((s) => ({ settingsOpen: v ?? !s.settingsOpen })),
+  toggleTasks: (v) =>
+    set((s) => {
+      const tasksOpen = v ?? !s.tasksOpen
+      return tasksOpen
+        ? { tasksOpen, automationsOpen: false, historyOpen: false }
+        : { tasksOpen }
+    }),
+  toggleAutomations: (v) =>
+    set((s) => {
+      const automationsOpen = v ?? !s.automationsOpen
+      return automationsOpen
+        ? { automationsOpen, tasksOpen: false, historyOpen: false }
+        : { automationsOpen }
+    }),
+  toggleHistory: (v) =>
+    set((s) => {
+      const historyOpen = v ?? !s.historyOpen
+      return historyOpen
+        ? { historyOpen, tasksOpen: false, automationsOpen: false }
+        : { historyOpen }
+    }),
+  addAutomationFromTemplate: (template) => {
+    const id = uidPrefixed('auto_')
+    const models = get().models
+    const modelId =
+      models.find((m) => m.id === 'codex')?.id ?? models.find((m) => m.id !== 'custom')?.id ?? models[0]?.id ?? 'codex'
+    const automation: Automation = {
+      id,
+      name: template.name,
+      category: template.category,
+      description: template.description,
+      prompt: template.prompt,
+      modelId,
+      schedule: template.schedule,
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      nextRunAt: computeNextRun(template.schedule)
+    }
+    const automations = [...get().automations, automation]
+    saveAutomations(automations)
+    set({ automations })
+    return id
+  },
+  addBlankAutomation: () => {
+    const id = uidPrefixed('auto_')
+    const models = get().models
+    const modelId =
+      models.find((m) => m.id === 'codex')?.id ?? models.find((m) => m.id !== 'custom')?.id ?? models[0]?.id ?? 'codex'
+    const automation: Automation = {
+      id,
+      name: 'New automation',
+      category: 'CUSTOM',
+      description: '',
+      prompt: '',
+      modelId,
+      schedule: 'daily',
+      enabled: false,
+      createdAt: new Date().toISOString(),
+      nextRunAt: undefined
+    }
+    const automations = [...get().automations, automation]
+    saveAutomations(automations)
+    set({ automations })
+    return id
+  },
+  updateAutomation: (id, patch) => {
+    const automations = get().automations.map((a) => {
+      if (a.id !== id) return a
+      const next = { ...a, ...patch }
+      // Re-arm the next run when the schedule changes or it's (re-)enabled.
+      if ((patch.schedule && patch.schedule !== a.schedule) || (patch.enabled && !a.enabled)) {
+        next.nextRunAt = computeNextRun(next.schedule)
+      }
+      if (patch.enabled === false) next.nextRunAt = undefined
+      return next
+    })
+    saveAutomations(automations)
+    set({ automations })
+  },
+  removeAutomation: (id) => {
+    const automations = get().automations.filter((a) => a.id !== id)
+    const automationRuns = get().automationRuns.filter((r) => r.automationId !== id)
+    saveAutomations(automations)
+    saveAutomationRuns(automationRuns)
+    set({ automations, automationRuns })
+  },
+  runAutomation: (id, trigger = 'manual') => {
+    const state = get()
+    const automation = state.automations.find((a) => a.id === id)
+    if (!automation) return
+    if (!automation.prompt.trim()) return
+    const model = state.models.find((m) => m.id === automation.modelId) ?? state.models[0]
+    if (!model) return
+
+    bindAutomationListeners(set, get)
+    const runId = uidPrefixed('run_')
+    const run: AutomationRun = {
+      id: runId,
+      automationId: id,
+      startedAt: new Date().toISOString(),
+      status: 'running',
+      trigger,
+      output: ''
+    }
+    activeAutomationRuns.add(runId)
+
+    const startedAt = run.startedAt
+    const automations = state.automations.map((a) =>
+      a.id === id
+        ? { ...a, lastRunAt: startedAt, nextRunAt: a.enabled ? computeNextRun(a.schedule) : a.nextRunAt }
+        : a
+    )
+    const automationRuns = [run, ...state.automationRuns].slice(0, 200)
+    saveAutomations(automations)
+    saveAutomationRuns(automationRuns)
+    set({ automations, automationRuns })
+
+    window.api.chatSend({
+      id: runId,
+      modelId: model.id,
+      command: model.command,
+      prompt: automation.prompt,
+      cwd: state.workspace?.kind === 'project' ? state.workspace.path : undefined
+    })
+  },
+  tickAutomations: () => {
+    const now = Date.now()
+    const runs = get().automationRuns
+    const due = get().automations.filter(
+      (a) =>
+        a.enabled &&
+        typeof a.nextRunAt === 'number' &&
+        a.nextRunAt <= now &&
+        !runs.some((r) => r.automationId === a.id && r.status === 'running')
+    )
+    for (const a of due) get().runAutomation(a.id, 'schedule')
+  },
+  setGithubToken: (token) => {
+    const trimmed = token.trim()
+    try {
+      if (trimmed) window.localStorage.setItem(GITHUB_TOKEN_STORAGE, trimmed)
+      else window.localStorage.removeItem(GITHUB_TOKEN_STORAGE)
+    } catch {
+      /* ignore storage errors */
+    }
+    set({ githubToken: trimmed })
+  },
 
   setTheme: (theme) => {
     applyTheme(theme)
@@ -779,13 +1277,17 @@ export const useStore = create<AppState>((set, get) => ({
         window.localStorage.setItem(PRIVACY_STORAGE, JSON.stringify(next))
         // Turning off "remember" options should also drop anything already stored.
         if (settings.rememberHistory === false) clearChatHistoryStorage()
-        if (settings.rememberWorkspace === false) clearWorkspaceRef()
+        if (settings.rememberWorkspace === false) {
+          clearWorkspaceRef()
+          saveRecentProjects([])
+        }
       } catch {
         /* ignore storage errors */
       }
       return {
         privacySettings: next,
-        chatHistory: settings.rememberHistory === false ? [] : s.chatHistory
+        chatHistory: settings.rememberHistory === false ? [] : s.chatHistory,
+        recentProjects: settings.rememberWorkspace === false ? [] : s.recentProjects
       }
     })
   },
@@ -836,7 +1338,7 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {
       /* ignore storage errors */
     }
-    set({ workspace: null, workspaceError: null, imagePreview: null, runOutput: [], chatHistory: [] })
+    set({ workspace: null, workspaceError: null, recentProjects: [], imagePreview: null, runOutput: [], chatHistory: [] })
   },
 
   addChatHistoryEntry: (entry) => {
@@ -868,11 +1370,34 @@ export const useStore = create<AppState>((set, get) => ({
       const workspace = await window.api.openWorkspace(kind)
       if (workspace) {
         saveWorkspaceRef(workspace)
+        rememberProject(set, get, workspace)
         set({ workspace, workspaceError: null })
       }
     } catch (err) {
       set({ workspaceError: err instanceof Error ? err.message : 'Unable to open workspace.' })
     }
+  },
+
+  // Reopen a project from the recents list (or anywhere we have its path).
+  openProject: async (path) => {
+    set({ workspaceError: null })
+    try {
+      const workspace = await window.api.openWorkspacePath({ kind: 'project', path })
+      saveWorkspaceRef(workspace)
+      rememberProject(set, get, workspace)
+      set({ workspace, workspaceError: null, imagePreview: null })
+    } catch (err) {
+      set({ workspaceError: err instanceof Error ? err.message : 'Unable to open project.' })
+    }
+  },
+
+  removeRecentProject: (path) => {
+    set((s) => {
+      const key = path.toLowerCase()
+      const recentProjects = s.recentProjects.filter((p) => p.path.toLowerCase() !== key)
+      saveRecentProjects(recentProjects)
+      return { recentProjects }
+    })
   },
 
   restoreWorkspace: async () => {
@@ -886,6 +1411,7 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const workspace = await window.api.openWorkspacePath(saved)
       saveWorkspaceRef(workspace)
+      rememberProject(set, get, workspace)
       set({ workspace, workspaceError: null })
     } catch (err) {
       clearWorkspaceRef()

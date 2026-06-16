@@ -15,7 +15,12 @@ const PROMPT_ENV = 'GENNAL_CHAT_PROMPT'
 // non-interactively, and print a plain-text answer. Keyed by the first word of
 // the model's `command` so registry overrides with extra flags still match.
 const HEADLESS_ARGS: Record<string, string[]> = {
-  claude: ['-p'],
+  // `-p` is print/non-interactive mode. `--permission-mode bypassPermissions`
+  // lets Claude actually run its tools (Bash, file edits) without waiting for an
+  // approval prompt it can never answer in a headless chat — so tasks like "run
+  // the app" or "fix the build" execute instead of stalling. This grants the
+  // chat the same autonomy as an interactive Claude session in this workspace.
+  claude: ['-p', '--permission-mode', 'bypassPermissions'],
   // `exec` is codex's non-interactive mode. For a chat panel we want snappy
   // replies, so drop reasoning effort to "low" (medium spends many seconds
   // "thinking" before answering) and skip the git-repo check that otherwise
@@ -60,13 +65,15 @@ function decoratePrompt(cli: string, prompt: string, images: string[]): string {
   return `${prompt}\n\n${header}\n${refs}`.trim()
 }
 
-// Headless runs sometimes never finish: a CLI may enter an agent loop and stall
-// on an approval, auth, or tool call that can't be answered non-interactively
-// (e.g. Gemini's "[LocalAgentExecutor] Blocked call: Unauthorized", which comes
-// from a user's own hooks/wrappers). Without a cap the chat would spin forever,
-// so a run that has produced no answer by this point is stopped and reported.
-// Kept short so a stuck run fails fast instead of leaving the user waiting.
-const CHAT_TIMEOUT_MS = 90_000
+// Headless runs sometimes never finish: a CLI may stall on a sign-in or an
+// approval that can't be answered non-interactively (e.g. Gemini's
+// "[LocalAgentExecutor] Blocked call: Unauthorized" from a user's hooks). This
+// is an *inactivity* window — it resets on every chunk of output (see
+// armIdleTimer) — so a model that's actively working (running tools, streaming a
+// reply) is never cut off; only one that goes fully silent is stopped. Generous
+// enough to cover a tool call (build/test/app launch) that runs quietly for a
+// while before printing.
+const CHAT_TIMEOUT_MS = 120_000
 
 interface ChatJob {
   proc: ChildProcess
@@ -81,6 +88,18 @@ function emit(win: BrowserWindow, channel: string, payload: unknown): void {
 
 function baseCommand(command: string): string {
   return command.trim().split(/\s+/)[0] ?? ''
+}
+
+// Custom models can place the prompt explicitly with a `{prompt}` (or `{}`)
+// placeholder — needed for CLIs that take the message after a subcommand or as a
+// flag value (e.g. `kiro-cli chat {}`) rather than as a trailing positional. When
+// absent, the prompt is appended at the end, as before.
+function hasPromptPlaceholder(command: string): boolean {
+  return command.includes('{prompt}') || command.includes('{}')
+}
+
+function substitutePrompt(text: string, value: string): string {
+  return text.split('{prompt}').join(value).split('{}').join(value)
 }
 
 // Split a command string into argv tokens, honouring double quotes so paths
@@ -167,30 +186,31 @@ function createCodexParser(
   }
 }
 
+// How the prompt env var is referenced inside a shell command on each platform,
+// so it stays a single, un-parsed argument.
+function promptRef(): string {
+  return isWindows ? `$env:${PROMPT_ENV}` : `"$${PROMPT_ENV}"`
+}
+
 /**
- * Builds the shell invocation that runs a model headlessly. `commandPrefix` is
- * everything before the prompt (e.g. `claude -p`, or a custom model's full
- * command like `ollama run llama3`). The prompt is referenced as an environment
- * variable so it stays a single, un-parsed argument on every platform. This is
- * the fallback path for commands that can't be spawned directly (Windows
- * `.cmd`/`.bat` shims, shell builtins).
+ * Builds the shell invocation that runs a model headlessly. `body` is the full
+ * command to run with the prompt already placed (either substituted into a
+ * `{prompt}` placeholder or appended via {@link promptRef}). This is the fallback
+ * path for commands that can't be spawned directly (Windows `.cmd`/`.bat` shims,
+ * shell builtins) or that use shell features.
  */
-function buildInvocation(commandPrefix: string): { shell: string; args: string[] } {
+function buildInvocation(body: string): { shell: string; args: string[] } {
   if (isWindows) {
-    const ref = `$env:${PROMPT_ENV}`
-    const command = `& ${commandPrefix} ${ref}`
     return {
       shell: 'powershell.exe',
-      args: ['-NoProfile', '-NonInteractive', '-Command', command]
+      args: ['-NoProfile', '-NonInteractive', '-Command', `& ${body}`]
     }
   }
 
   // Login shell so the user's PATH (nvm/brew/npm globals) is on PATH, matching
   // how the interactive terminals already resolve these CLIs.
   const userShell = process.env.SHELL || (isMac ? '/bin/zsh' : '/bin/bash')
-  const ref = `"$${PROMPT_ENV}"`
-  const command = `${commandPrefix} ${ref}`
-  return { shell: userShell, args: ['-l', '-c', command] }
+  return { shell: userShell, args: ['-l', '-c', body] }
 }
 
 export function startChat(win: BrowserWindow, payload: ChatSendPayload): void {
@@ -213,23 +233,32 @@ export function startChat(win: BrowserWindow, payload: ChatSendPayload): void {
   const decorated: ChatSendPayload = { ...payload, prompt }
 
   // Built-in CLIs get their known print-mode flags; user-added models run their
-  // own command with the prompt appended as a trailing argument.
+  // own command with the prompt appended as a trailing argument — unless the
+  // command has a `{prompt}`/`{}` placeholder, which says exactly where it goes.
   const headlessArgs = HEADLESS_ARGS[cli]
+  const placeheld = !headlessArgs && hasPromptPlaceholder(command)
   const prefixArgs = headlessArgs ? [...headlessArgs, ...imgFlags] : imgFlags
   const imgFlagsShell = imageArgsForShell(cli, images)
-  const commandPrefix = headlessArgs
-    ? [cli, ...headlessArgs, ...imgFlagsShell].join(' ')
-    : [command.trim(), ...imgFlagsShell].join(' ')
+
+  // Full command body for the shell path, with the prompt already placed.
+  const ref = promptRef()
+  const shellBody = placeheld
+    ? [substitutePrompt(command.trim(), ref), ...imgFlagsShell].join(' ')
+    : headlessArgs
+      ? [cli, ...headlessArgs, ...imgFlagsShell, ref].join(' ')
+      : [command.trim(), ...imgFlagsShell, ref].join(' ')
 
   // codex runs with `--json`, so its stdout is a JSONL event stream we parse
   // rather than show verbatim (see spawnChat).
   const codexJson = cli === 'codex' && (headlessArgs?.includes('--json') ?? false)
 
   // A custom command using shell features (pipes, &&, redirects, substitution)
-  // only works through a shell, so skip the fast path for those.
-  if (!headlessArgs && /[|&;<>(){}$`]/.test(command)) {
-    const { shell, args } = buildInvocation(commandPrefix)
-    spawnChat(win, decorated, { file: shell, args, commandPrefix, triedShell: true, codexJson })
+  // only works through a shell, so skip the fast path for those. The placeholder
+  // braces are ours, not shell syntax, so don't let them force the shell path.
+  const shellTest = placeheld ? substitutePrompt(command, ' ') : command
+  if (!headlessArgs && /[|&;<>(){}$`]/.test(shellTest)) {
+    const { shell, args } = buildInvocation(shellBody)
+    spawnChat(win, decorated, { file: shell, args, shellBody, triedShell: true, codexJson })
     return
   }
 
@@ -237,16 +266,19 @@ export function startChat(win: BrowserWindow, payload: ChatSendPayload): void {
   // the prompt as a literal argv element. A real argument is never parsed as
   // shell syntax, so this is injection-safe, and it avoids the ~hundreds of ms
   // it takes to boot powershell.exe / a login shell on every single message.
+  const customArgs = tokenize(command).slice(1)
   const directArgs = headlessArgs
     ? [...prefixArgs, prompt]
-    : [...tokenize(command).slice(1), ...imgFlags, prompt]
-  spawnChat(win, decorated, { file: cli, args: directArgs, commandPrefix, triedShell: false, codexJson })
+    : placeheld
+      ? [...customArgs.map((t) => substitutePrompt(t, prompt)), ...imgFlags]
+      : [...customArgs, ...imgFlags, prompt]
+  spawnChat(win, decorated, { file: cli, args: directArgs, shellBody, triedShell: false, codexJson })
 }
 
 interface SpawnAttempt {
   file: string
   args: string[]
-  commandPrefix: string
+  shellBody: string
   triedShell: boolean
   codexJson: boolean
 }
@@ -258,11 +290,11 @@ function spawnChat(win: BrowserWindow, payload: ChatSendPayload, attempt: SpawnA
   // A `.cmd`/`.bat`/shell-builtin couldn't be found directly — retry through the
   // platform shell, which resolves PATH the same way the interactive terminals do.
   const fallbackToShell = (): void => {
-    const { shell, args } = buildInvocation(attempt.commandPrefix)
+    const { shell, args } = buildInvocation(attempt.shellBody)
     spawnChat(win, payload, {
       file: shell,
       args,
-      commandPrefix: attempt.commandPrefix,
+      shellBody: attempt.shellBody,
       triedShell: true,
       codexJson: attempt.codexJson
     })
@@ -319,7 +351,12 @@ function spawnChat(win: BrowserWindow, payload: ChatSendPayload, attempt: SpawnA
       )
     : null
 
-  job.timer = setTimeout(() => {
+  // Inactivity (idle) timeout, not a hard cap: a model that's actively working —
+  // streaming an answer, printing tool/command output, or emitting progress —
+  // keeps the run alive by resetting this timer on every chunk. Only a run that
+  // goes fully silent (genuinely stuck on an approval/sign-in it can't satisfy)
+  // is stopped. armIdleTimer() is called once now and again on each output chunk.
+  const onIdleTimeout = (): void => {
     if (jobs.get(id)?.proc !== proc) return
     try {
       proc.kill()
@@ -338,13 +375,19 @@ function spawnChat(win: BrowserWindow, payload: ChatSendPayload, attempt: SpawnA
       id,
       code: null,
       error:
-        `'${cli}' did not respond within ${Math.round(CHAT_TIMEOUT_MS / 1000)}s and was stopped. ` +
-        `It may be stuck on an approval, sign-in, or tool call it can't complete in this ` +
+        `'${cli}' went quiet for ${Math.round(CHAT_TIMEOUT_MS / 1000)}s and was stopped. ` +
+        `It may be stuck on a sign-in or an approval it can't complete in this ` +
         `non-interactive chat.${detail}`
     })
-  }, CHAT_TIMEOUT_MS)
+  }
+  const armIdleTimer = (): void => {
+    if (job.timer) clearTimeout(job.timer)
+    job.timer = setTimeout(onIdleTimeout, CHAT_TIMEOUT_MS)
+  }
+  armIdleTimer()
 
   proc.stdout?.on('data', (d: Buffer) => {
+    armIdleTimer()
     const chunk = d.toString()
     if (codexParser) {
       codexParser.push(chunk)
@@ -354,6 +397,7 @@ function spawnChat(win: BrowserWindow, payload: ChatSendPayload, attempt: SpawnA
     emit(win, 'chat:data', { id, stream: 'stdout', chunk })
   })
   proc.stderr?.on('data', (d: Buffer) => {
+    armIdleTimer()
     const chunk = d.toString()
     stderrTail = (stderrTail + chunk).slice(-2000)
     // For codex, progress comes from the parsed JSON events instead of the raw

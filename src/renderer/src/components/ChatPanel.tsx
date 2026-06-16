@@ -45,6 +45,18 @@ function isWeeklyLimit(label: string, windowMinutes?: number): boolean {
   return /week/i.test(label) || (typeof windowMinutes === 'number' && windowMinutes >= 1440)
 }
 
+// "just now" / "5m ago" / "3h ago" / "2d ago" for the chat-history list.
+function relTime(iso: string): string {
+  const then = new Date(iso).getTime()
+  if (!Number.isFinite(then)) return ''
+  const mins = Math.round((Date.now() - then) / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
+}
+
 interface ChatAttachment {
   path: string
   name: string
@@ -136,9 +148,42 @@ function parseParts(text: string): MessagePart[] {
   return parts.filter((p) => p.type === 'code' || p.content.length > 0)
 }
 
-// The code block most likely to be the full updated file (the largest one).
+// Code fences tagged as shell commands or command output are instructions to
+// run, not file contents — writing them into the open file would corrupt it, so
+// they never get an Apply button and are skipped by auto-apply.
+const NON_FILE_LANGS = new Set([
+  'bash', 'sh', 'shell', 'zsh', 'fish', 'console', 'terminal',
+  'powershell', 'pwsh', 'ps', 'ps1', 'cmd', 'bat', 'batch', 'dosbatch',
+  'text', 'txt', 'plaintext', 'log', 'output', 'diff', 'patch'
+])
+
+// A line that begins with a shell tool (or a *.cmd/*.ps1 wrapper) is a command,
+// not code. Catches blocks the model mislabels — e.g. `npm.cmd run lint` fenced
+// as ```js — which must never be written into a source file.
+const COMMAND_LINE_RE =
+  /^(?:\$\s*|>\s*|PS[^>]*>\s*)?(?:npm|npx|yarn|pnpm|bun|node|deno|ts-node|tsx|git|python3?|pip3?|cargo|rustc|go|dotnet|dart|flutter|gradle|gradlew|mvn|make|cmake|cd|ls|dir|mkdir|rmdir|rm|del|copy|cp|mv|cat|type|echo|curl|wget|sudo|chmod|chown|export|set|source|brew|apt|apt-get|docker|kubectl)\b|^\.[\\/]\S+|^[\w./\\-]+\.(?:cmd|ps1|bat|sh)\b/i
+
+/** True when every non-empty line of a block reads as a shell command. */
+function looksLikeCommandBlock(content: string): boolean {
+  const lines = content.split('\n').map((l) => l.trim()).filter(Boolean)
+  if (lines.length === 0) return false
+  return lines.every((l) => COMMAND_LINE_RE.test(l))
+}
+
+/** True when a code block looks like real file content the user can apply. */
+function isFileCode(part: MessagePart): boolean {
+  return (
+    part.type === 'code' &&
+    part.content.trim().length > 0 &&
+    !NON_FILE_LANGS.has((part.lang ?? '').toLowerCase()) &&
+    !looksLikeCommandBlock(part.content)
+  )
+}
+
+// The code block most likely to be the full updated file (the largest one that
+// actually looks like file content, not a shell command).
 function bestCodeBlock(text: string): string | null {
-  const blocks = parseParts(text).filter((p) => p.type === 'code')
+  const blocks = parseParts(text).filter(isFileCode)
   if (blocks.length === 0) return null
   return blocks.reduce((a, b) => (b.content.length > a.content.length ? b : a)).content
 }
@@ -162,6 +207,9 @@ export default function ChatPanel({ active = true }: { active?: boolean }): JSX.
   const applyCode = useStore((s) => s.applyCode)
   const workspace = useStore((s) => s.workspace)
   const addChatHistoryEntry = useStore((s) => s.addChatHistoryEntry)
+  const chatHistory = useStore((s) => s.chatHistory)
+  const clearChatHistory = useStore((s) => s.clearChatHistory)
+  const toggleAddModel = useStore((s) => s.toggleAddModel)
 
   const [modelId, setModelId] = useState('')
   const [input, setInput] = useState('')
@@ -172,6 +220,7 @@ export default function ChatPanel({ active = true }: { active?: boolean }): JSX.
   const [autoApply, setAutoApply] = useState(true)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [showUsage, setShowUsage] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const [usage, setUsage] = useState<CliUsage | null>(null)
   const [usageLoading, setUsageLoading] = useState(false)
   const [usageError, setUsageError] = useState('')
@@ -278,6 +327,27 @@ export default function ChatPanel({ active = true }: { active?: boolean }): JSX.
       cancelled = true
     }
   }, [showUsage, modelId])
+
+  // Load a saved exchange back into the view so the user can read it again or
+  // keep the thread going. Cancels any in-flight reply first.
+  const loadHistoryEntry = (entry: (typeof chatHistory)[number]): void => {
+    if (requestIdRef.current) window.api.chatCancel(requestIdRef.current)
+    pendingMsgRef.current = null
+    requestIdRef.current = null
+    activePromptRef.current = null
+    stdoutRef.current = ''
+    stderrRef.current = ''
+    setBusy(false)
+    setProgress('')
+    setNotice(null)
+    setAttachments([])
+    if (chatModels.some((m) => m.id === entry.modelId)) setModelId(entry.modelId)
+    setMessages(
+      entry.messages.map((m) => ({ id: uid(), role: m.role, text: m.text, error: m.error }))
+    )
+    setShowHistory(false)
+    setShowUsage(false)
+  }
 
   const newChat = (): void => {
     if (requestIdRef.current) window.api.chatCancel(requestIdRef.current)
@@ -571,6 +641,22 @@ export default function ChatPanel({ active = true }: { active?: boolean }): JSX.
                     <span className="grid-menu-check" aria-hidden="true" />
                   </button>
                 ))}
+                <div className="chat-model-menu-sep" role="separator" />
+                <button
+                  className="chat-model-add"
+                  role="menuitem"
+                  onClick={() => {
+                    setModelMenuOpen(false)
+                    toggleAddModel(true)
+                  }}
+                >
+                  <span className="chat-model-add-icon" aria-hidden="true">
+                    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                      <path d="M8 3.2v9.6M3.2 8h9.6" />
+                    </svg>
+                  </span>
+                  <span>Add model</span>
+                </button>
               </div>
             )}
           </div>
@@ -582,8 +668,22 @@ export default function ChatPanel({ active = true }: { active?: boolean }): JSX.
         </span>
         <div className="chat-conn-actions">
           <button
+            className={`chat-head-btn ${showHistory ? 'active' : ''}`}
+            onClick={() => {
+              setShowHistory((v) => !v)
+              setShowUsage(false)
+            }}
+            aria-pressed={showHistory}
+            title="Open a past chat"
+          >
+            History
+          </button>
+          <button
             className={`chat-head-btn ${showUsage ? 'active' : ''}`}
-            onClick={() => setShowUsage((v) => !v)}
+            onClick={() => {
+              setShowUsage((v) => !v)
+              setShowHistory(false)
+            }}
             disabled={!ready}
             aria-pressed={showUsage}
             title="View this model's plan and usage limits"
@@ -691,6 +791,46 @@ export default function ChatPanel({ active = true }: { active?: boolean }): JSX.
         </div>
       )}
 
+      {showHistory && (
+        <div className="chat-history">
+          <div className="chat-history-head">
+            <span>Recent chats</span>
+            {chatHistory.length > 0 && (
+              <button className="chat-history-clear" onClick={() => clearChatHistory()}>
+                Clear all
+              </button>
+            )}
+          </div>
+          {chatHistory.length === 0 ? (
+            <div className="chat-usage-empty">No past chats yet. Finished chats show up here.</div>
+          ) : (
+            <div className="chat-history-list">
+              {[...chatHistory].reverse().map((entry) => {
+                const firstUser = entry.messages.find((m) => m.role === 'user')
+                const title = firstUser?.text.trim() || '(image only)'
+                const dot = models.find((m) => m.id === entry.modelId)?.accent ?? '#7c5cff'
+                return (
+                  <button
+                    key={entry.id}
+                    className="chat-history-item"
+                    title={title}
+                    onClick={() => loadHistoryEntry(entry)}
+                  >
+                    <span className="chat-history-dot" style={{ background: dot }} aria-hidden="true" />
+                    <span className="chat-history-main">
+                      <span className="chat-history-title">{title}</span>
+                      <span className="chat-history-meta">
+                        {entry.modelLabel} · {relTime(entry.createdAt)}
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="chat-messages" ref={listRef}>
         {messages.length === 0 ? (
           <div className="chat-empty">
@@ -750,9 +890,11 @@ export default function ChatPanel({ active = true }: { active?: boolean }): JSX.
                         <div className="chat-code" key={i}>
                           <div className="chat-code-head">
                             <span className="chat-code-lang">{part.lang ?? 'code'}</span>
-                            <button className="chat-approve" onClick={() => void approve(part.content)}>
-                              {autoApply && canAttach ? 'Re-apply' : 'Approve'}
-                            </button>
+                            {isFileCode(part) && (
+                              <button className="chat-approve" onClick={() => void approve(part.content)}>
+                                {autoApply && canAttach ? 'Re-apply' : 'Approve'}
+                              </button>
+                            )}
                           </div>
                           <pre>{part.content}</pre>
                         </div>

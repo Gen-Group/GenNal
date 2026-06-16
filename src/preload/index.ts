@@ -1,10 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
+  AgentSessionHistory,
   AttachmentSaveResult,
   ChatData,
   ChatExit,
   ChatSendPayload,
   CliUsage,
+  GithubFetchPayload,
+  GithubWorkResult,
   ModelDef,
   PtyCreatePayload,
   PtyData,
@@ -40,6 +43,11 @@ const api = {
 
   getUsage: (modelId: string): Promise<CliUsage> => ipcRenderer.invoke('usage:get', modelId),
 
+  getSessionHistory: (): Promise<AgentSessionHistory> => ipcRenderer.invoke('history:list'),
+
+  fetchGithubWork: (payload: GithubFetchPayload): Promise<GithubWorkResult> =>
+    ipcRenderer.invoke('github:fetch', payload),
+
   openWorkspace: (kind: WorkspaceKind): Promise<WorkspaceOpenResult | null> =>
     ipcRenderer.invoke('workspace:open', kind),
   openWorkspacePath: (payload: WorkspaceOpenPathPayload): Promise<WorkspaceOpenResult> =>
@@ -56,6 +64,8 @@ const api = {
     ipcRenderer.invoke('attachments:save-clipboard-image'),
   pickImages: (): Promise<AttachmentSaveResult[]> => ipcRenderer.invoke('attachments:pick-images'),
   writeClipboardText: (text: string): void => ipcRenderer.send('clipboard:write-text', text),
+  readClipboardText: (): Promise<string> => ipcRenderer.invoke('clipboard:read-text'),
+  suppressNextContextMenu: (): void => ipcRenderer.send('terminal:suppress-context-menu'),
 
   ptyCreate: (payload: PtyCreatePayload): void => ipcRenderer.send('pty:create', payload),
   ptyInput: (id: string, data: string): void => ipcRenderer.send('pty:input', { id, data }),

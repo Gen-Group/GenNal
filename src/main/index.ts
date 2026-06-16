@@ -3,6 +3,7 @@ import { promises as fs } from 'fs'
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'path'
 import { loadModels, saveModels } from './model-registry'
 import { readCliUsage } from './usage-reader'
+import { readAgentSessionHistory } from './session-history-reader'
 import {
   createSession,
   writeSession,
@@ -13,9 +14,11 @@ import {
 import { startStats, stopStats } from './stats-service'
 import { startRun, stopRun } from './run-manager'
 import { startChat, cancelChat, cancelAllChats } from './chat-manager'
+import { fetchGithubWork } from './github-service'
 import type {
   AttachmentSaveResult,
   ChatSendPayload,
+  GithubFetchPayload,
   ModelDef,
   PtyCreatePayload,
   RunStartPayload,
@@ -400,10 +403,16 @@ function setupAppMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+// When the renderer handles a right-click itself (terminal "right-click to
+// paste"), it asks main to skip the next native context menu so the two don't
+// both fire.
+let suppressContextUntil = 0
+
 // Right-click anywhere → Copy (when text is selected) plus Cut/Paste/Select-All
 // where editing makes sense.
 function attachContextMenu(win: BrowserWindow): void {
   win.webContents.on('context-menu', (_e, params) => {
+    if (Date.now() < suppressContextUntil) return
     const hasSelection = params.selectionText.trim().length > 0
     // Only show the native Cut/Copy/Paste menu where it makes sense: in an
     // editable field or over selected text. Otherwise stay out of the way so the
@@ -470,6 +479,10 @@ function registerIpc(): void {
   ipcMain.handle('models:save', (_e, models: ModelDef[]) => saveModels(models))
 
   ipcMain.handle('usage:get', (_e, modelId: string) => readCliUsage(modelId))
+
+  ipcMain.handle('history:list', () => readAgentSessionHistory())
+
+  ipcMain.handle('github:fetch', (_e, payload: GithubFetchPayload) => fetchGithubWork(payload))
 
   ipcMain.handle('workspace:open', async (_e, kind: WorkspaceKind): Promise<WorkspaceOpenResult | null> => {
     const options = {
@@ -570,6 +583,12 @@ function registerIpc(): void {
 
   ipcMain.on('clipboard:write-text', (_e, text: string) => {
     clipboard.writeText(text)
+  })
+
+  ipcMain.handle('clipboard:read-text', () => clipboard.readText())
+
+  ipcMain.on('terminal:suppress-context-menu', () => {
+    suppressContextUntil = Date.now() + 300
   })
 
   ipcMain.on('pty:create', (_e, payload: PtyCreatePayload) => {

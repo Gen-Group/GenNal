@@ -464,6 +464,7 @@ export default function SettingsPanel(): JSX.Element | null {
   const setTheme = useStore((s) => s.setTheme)
   const terminalSettings = useStore((s) => s.terminalSettings)
   const setTerminalSettings = useStore((s) => s.setTerminalSettings)
+  const removeSession = useStore((s) => s.removeSession)
   const privacySettings = useStore((s) => s.privacySettings)
   const setPrivacySettings = useStore((s) => s.setPrivacySettings)
   const chatHistory = useStore((s) => s.chatHistory)
@@ -785,117 +786,214 @@ export default function SettingsPanel(): JSX.Element | null {
             </div>
           ) : active === 'terminal' ? (
             <div className="settings-content terminal-panel">
-              <div className="settings-summary-grid">
-                <div className="settings-summary">
-                  <span>Active terminals</span>
-                  <strong>{runningSessions}</strong>
-                </div>
-                <div className="settings-summary">
-                  <span>Total sessions</span>
-                  <strong>{totalSessions}</strong>
-                </div>
-                <div className="settings-summary">
-                  <span>Scrollback</span>
-                  <strong>{terminalSettings.scrollback.toLocaleString()}</strong>
-                </div>
+              <div className="settings-section-head">
+                <h4>Windows Shell</h4>
+                <p>Default shell for new terminal panes on Windows.</p>
               </div>
-
-              <div className="settings-card terminal-preview-card">
+              <div className="settings-card">
                 <div>
-                  <h3>Terminal preview</h3>
-                  <p>These preferences apply to new terminals and update open terminal panes.</p>
+                  <h3>Default Shell</h3>
+                  <p>Shell used when opening a new terminal pane. Takes effect for new terminals.</p>
                 </div>
-                <div
-                  className="terminal-preview"
-                  style={{
-                    fontFamily: terminalSettings.fontFamily,
-                    fontSize: terminalSettings.fontSize
-                  }}
-                >
-                  <span className="terminal-preview-prompt">$</span> codex --help
-                  <br />
-                  <span className="terminal-preview-muted">Ready for commands</span>
-                  <span className={terminalSettings.cursorBlink ? 'terminal-preview-cursor blink' : 'terminal-preview-cursor'} />
+                <div className="settings-segment">
+                  {([['powershell', 'PowerShell'], ['cmd', 'Command Prompt'], ['gitbash', 'Git Bash'], ['wsl', 'WSL']] as const).map(([id, label]) => (
+                    <button key={id} className={terminalSettings.windowsShell === id ? 'active' : ''} onClick={() => setTerminalSettings({ windowsShell: id })}>{label}</button>
+                  ))}
                 </div>
               </div>
 
+              <div className="settings-section-head">
+                <h4>Rendering</h4>
+                <p>Terminal renderer behavior for live panes and new panes.</p>
+              </div>
+              <div className="settings-card">
+                <div>
+                  <h3>GPU Acceleration</h3>
+                  <p>Auto tries WebGL, with DOM fallback for unsupported or risky renderers.</p>
+                </div>
+                <div className="settings-segment">
+                  {([['auto', 'Auto'], ['on', 'On'], ['off', 'Off']] as const).map(([id, label]) => (
+                    <button key={id} className={terminalSettings.gpuAcceleration === id ? 'active' : ''} onClick={() => setTerminalSettings({ gpuAcceleration: id })}>{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-section-head">
+                <h4>Terminal Interaction</h4>
+                <p>Mouse and clipboard behavior for terminal panes.</p>
+              </div>
+              {([
+                { key: 'rightClickPaste', title: 'Right-click to paste', desc: 'On Windows, right-click pastes the clipboard. Ctrl+right-click opens the context menu.' },
+                { key: 'focusFollowsMouse', title: 'Focus Follows Mouse', desc: 'Hovering a terminal pane activates it without needing to click.' },
+                { key: 'copyOnSelect', title: 'Copy on Select', desc: 'Automatically copy terminal selections to the clipboard.' },
+                { key: 'osc52', title: 'Allow TUI Clipboard Writes (OSC 52)', desc: 'Let programs in the terminal (tmux, Neovim, fzf, SSH) copy to your system clipboard.' }
+              ] as const).map((row) => {
+                const on = terminalSettings[row.key]
+                return (
+                  <div className="settings-card" key={row.key}>
+                    <div>
+                      <h3>{row.title}</h3>
+                      <p>{row.desc}</p>
+                    </div>
+                    <button
+                      className={`task-toggle ${on ? 'on' : ''}`}
+                      aria-pressed={on}
+                      aria-label={row.title}
+                      onClick={() => setTerminalSettings({ [row.key]: !on } as Parameters<typeof setTerminalSettings>[0])}
+                    >
+                      <span />
+                    </button>
+                  </div>
+                )
+              })}
+
+              <div className="settings-section-head">
+                <h4>Workspace Setup Script</h4>
+                <p>Where the repository setup script runs when a new workspace is created.</p>
+              </div>
+              <div className="settings-card">
+                <div>
+                  <h3>Setup Script Location</h3>
+                  <p>“New Tab” opens the setup command in a background tab titled “Setup” without stealing focus.</p>
+                </div>
+                <div className="settings-segment">
+                  {([['newtab', 'New Tab'], ['vertical', 'Split Vertically'], ['horizontal', 'Split Horizontally']] as const).map(([id, label]) => (
+                    <button key={id} className={terminalSettings.setupScriptLocation === id ? 'active' : ''} onClick={() => setTerminalSettings({ setupScriptLocation: id })}>{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-section-head">
+                <h4>Manage Sessions</h4>
+                <p>Recover from a frozen or misbehaving terminal by killing sessions or restarting the underlying daemon.</p>
+              </div>
+              <div className="settings-sessions">
+                <div className="ss-head">
+                  <span className="ss-title">Sessions ({sessions.length})</span>
+                  <button
+                    className="ss-head-btn"
+                    title="Kill all sessions"
+                    aria-label="Kill all sessions"
+                    disabled={sessions.length === 0}
+                    onClick={() => sessions.forEach((s) => removeSession(s.id))}
+                  >
+                    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M3 4.5h10M6.5 4.5V3.6a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v.9M4.8 4.5l.55 8a1 1 0 0 0 1 .93h3.3a1 1 0 0 0 1-.93l.55-8" />
+                    </svg>
+                  </button>
+                </div>
+                {sessions.length === 0 ? (
+                  <div className="ss-empty">No active terminal sessions.</div>
+                ) : (
+                  sessions.map((s) => (
+                    <div className="ss-row" key={s.id}>
+                      <span className={`ss-dot ${s.status === 'running' ? 'on' : ''}`} aria-hidden="true" />
+                      <span className="ss-name">{s.cwd ?? s.label}</span>
+                      <span className="ss-id">{s.id}::{s.cwd ?? '~'}</span>
+                      <button className="ss-kill" aria-label={`Kill ${s.label}`} onClick={() => removeSession(s.id)}>×</button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="settings-section-head">
+                <h4>Advanced</h4>
+                <p>Scrollback, word boundaries, and platform-specific terminal behaviors.</p>
+              </div>
+              <div className="settings-card">
+                <div>
+                  <h3>Scrollback Size</h3>
+                  <p>Maximum terminal scrollback buffer size for new terminal panes.</p>
+                </div>
+                <div className="settings-segment">
+                  {[10, 25, 50, 100, 250].map((mb) => (
+                    <button key={mb} className={terminalSettings.scrollbackMB === mb ? 'active' : ''} onClick={() => setTerminalSettings({ scrollbackMB: mb })}>{mb} MB</button>
+                  ))}
+                  <button
+                    className={![10, 25, 50, 100, 250].includes(terminalSettings.scrollbackMB) ? 'active' : ''}
+                    onClick={() => {
+                      const v = window.prompt('Scrollback size in MB', String(terminalSettings.scrollbackMB))
+                      const n = Number(v)
+                      if (Number.isFinite(n) && n > 0 && n <= 2000) setTerminalSettings({ scrollbackMB: n })
+                    }}
+                  >
+                    Custom
+                  </button>
+                </div>
+              </div>
+              <div className="settings-card">
+                <div>
+                  <h3>Word Separators</h3>
+                  <p>Characters treated as word boundaries for double-click selection.</p>
+                </div>
+                <input
+                  className="settings-text-input"
+                  value={terminalSettings.wordSeparators}
+                  spellCheck={false}
+                  onChange={(e) => setTerminalSettings({ wordSeparators: e.target.value })}
+                />
+              </div>
+              <div className="settings-card">
+                <div>
+                  <h3>PowerShell Version</h3>
+                  <p>
+                    Auto uses Windows PowerShell now and switches to PowerShell 7+ when installed.{' '}
+                    <button
+                      className="settings-link"
+                      onClick={() => window.open('https://learn.microsoft.com/powershell/scripting/install/installing-powershell', '_blank', 'noopener,noreferrer')}
+                    >
+                      Download PowerShell 7+
+                    </button>
+                    .
+                  </p>
+                </div>
+                <div className="settings-segment">
+                  {([['auto', 'Auto'], ['windows', 'Windows PowerShell'], ['pwsh7', 'PowerShell 7+']] as const).map(([id, label]) => (
+                    <button key={id} className={terminalSettings.powershellVersion === id ? 'active' : ''} onClick={() => setTerminalSettings({ powershellVersion: id })}>{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-section-head">
+                <h4>Appearance</h4>
+                <p>Font and cursor for terminal panes.</p>
+              </div>
               <div className="settings-card">
                 <div>
                   <h3>Font size</h3>
-                  <p>Set the terminal text size used by every model pane.</p>
+                  <p>Terminal text size used by every pane.</p>
                 </div>
-                <div className="settings-grid-actions">
+                <div className="settings-segment">
                   {[11, 12.5, 14, 16].map((size) => (
-                    <button
-                      key={size}
-                      className={terminalSettings.fontSize === size ? 'active' : ''}
-                      onClick={() => setTerminalSettings({ fontSize: size })}
-                    >
-                      {size}
-                    </button>
+                    <button key={size} className={terminalSettings.fontSize === size ? 'active' : ''} onClick={() => setTerminalSettings({ fontSize: size })}>{size}</button>
                   ))}
                 </div>
               </div>
-
               <div className="settings-card terminal-font-card">
                 <div>
                   <h3>Font family</h3>
-                  <p>Choose a monospace font stack for xterm panes.</p>
+                  <p>Monospace font stack for xterm panes.</p>
                 </div>
                 <div className="terminal-font-options">
                   {TERMINAL_FONT_OPTIONS.map((font) => (
-                    <button
-                      key={font}
-                      className={terminalSettings.fontFamily === font ? 'active' : ''}
-                      style={{ fontFamily: font }}
-                      onClick={() => setTerminalSettings({ fontFamily: font })}
-                    >
-                      {font.split(',')[0]}
-                    </button>
+                    <button key={font} className={terminalSettings.fontFamily === font ? 'active' : ''} style={{ fontFamily: font }} onClick={() => setTerminalSettings({ fontFamily: font })}>{font.split(',')[0]}</button>
                   ))}
                 </div>
               </div>
-
               <div className="settings-card task-options-card">
                 <div>
                   <h3>Behavior</h3>
-                  <p>Control cursor and session launch behavior.</p>
+                  <p>Cursor blink and session launch focus.</p>
                 </div>
                 <div className="task-option-list">
                   <label className="task-check">
-                    <input
-                      type="checkbox"
-                      checked={terminalSettings.cursorBlink}
-                      onChange={(event) => setTerminalSettings({ cursorBlink: event.target.checked })}
-                    />
+                    <input type="checkbox" checked={terminalSettings.cursorBlink} onChange={(e) => setTerminalSettings({ cursorBlink: e.target.checked })} />
                     <span>Blink terminal cursor</span>
                   </label>
                   <label className="task-check">
-                    <input
-                      type="checkbox"
-                      checked={terminalSettings.focusNewSessions}
-                      onChange={(event) => setTerminalSettings({ focusNewSessions: event.target.checked })}
-                    />
+                    <input type="checkbox" checked={terminalSettings.focusNewSessions} onChange={(e) => setTerminalSettings({ focusNewSessions: e.target.checked })} />
                     <span>Focus newly launched sessions</span>
                   </label>
-                </div>
-              </div>
-
-              <div className="settings-card task-limit-card">
-                <div>
-                  <h3>Scrollback buffer</h3>
-                  <p>Choose how many terminal lines are kept in memory.</p>
-                </div>
-                <div className="settings-grid-actions">
-                  {TERMINAL_SCROLLBACK_OPTIONS.map((limit) => (
-                    <button
-                      key={limit}
-                      className={terminalSettings.scrollback === limit ? 'active' : ''}
-                      onClick={() => setTerminalSettings({ scrollback: limit })}
-                    >
-                      {limit >= 1000 ? `${limit / 1000}k` : limit}
-                    </button>
-                  ))}
                 </div>
               </div>
             </div>

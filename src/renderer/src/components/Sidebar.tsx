@@ -55,7 +55,23 @@ function fileKind(file: WorkspaceFile): string {
 }
 
 function FileGlyph({ file }: { file: WorkspaceFile }): JSX.Element {
-  return <span className={`file-glyph kind-${fileKind(file)}`} aria-hidden="true" />
+  const kind = fileKind(file)
+  return (
+    <span className={`file-glyph kind-${kind}`} aria-hidden="true">
+      {kind === 'img' ? (
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="2.2" y="3" width="11.6" height="10" rx="1.6" />
+          <circle cx="6" cy="6.4" r="1.1" />
+          <path d="M3 11.5 6.3 8.6l2 1.8 2.3-2.4 2.4 2.6" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 1.9h4.7L12 5.2v8.9H4z" />
+          <path d="M8.6 2.1V5.3H12" />
+        </svg>
+      )}
+    </span>
+  )
 }
 
 function fileDisplayPath(file: WorkspaceFile): { name: string; folder: string } {
@@ -143,6 +159,15 @@ function workspaceInitial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || 'W'
 }
 
+const PROJECT_ACCENTS = ['#7c5cff', '#2f8cff', '#22c55e', '#f97316', '#ec4899', '#14b8a6', '#a78bfa', '#f59e0b']
+
+/** Stable accent for a project's monogram, derived from its path. */
+function projectAccent(path: string): string {
+  let hash = 0
+  for (let i = 0; i < path.length; i++) hash = (hash * 31 + path.charCodeAt(i)) | 0
+  return PROJECT_ACCENTS[Math.abs(hash) % PROJECT_ACCENTS.length]
+}
+
 function userInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   if (parts.length === 0) return '+'
@@ -174,6 +199,8 @@ export default function Sidebar(): JSX.Element {
   const [filterMenu, setFilterMenu] = useState<{ x: number; y: number } | null>(null)
   const [workspaceFilter, setWorkspaceFilter] = useState<WorkspaceFilterId>('all')
   const [confirmNewWindowOpen, setConfirmNewWindowOpen] = useState(false)
+  const [addProjectOpen, setAddProjectOpen] = useState(false)
+  const [activeNav, setActiveNav] = useState<'tasks' | 'automations' | null>(null)
   const sessions = useStore((s) => s.sessions)
   const activeId = useStore((s) => s.activeId)
   const setActive = useStore((s) => s.setActive)
@@ -181,11 +208,20 @@ export default function Sidebar(): JSX.Element {
   const addSession = useStore((s) => s.addSession)
   const stats = useStore((s) => s.stats)
   const togglePalette = useStore((s) => s.togglePalette)
+  const tasksOpen = useStore((s) => s.tasksOpen)
+  const toggleTasks = useStore((s) => s.toggleTasks)
+  const automationsOpen = useStore((s) => s.automationsOpen)
+  const toggleAutomations = useStore((s) => s.toggleAutomations)
+  const historyOpen = useStore((s) => s.historyOpen)
+  const toggleHistory = useStore((s) => s.toggleHistory)
   const profile = useStore((s) => s.profile)
   const toggleProfileSetup = useStore((s) => s.toggleProfileSetup)
   const workspace = useStore((s) => s.workspace)
   const workspaceError = useStore((s) => s.workspaceError)
+  const recentProjects = useStore((s) => s.recentProjects)
   const openWorkspace = useStore((s) => s.openWorkspace)
+  const openProject = useStore((s) => s.openProject)
+  const removeRecentProject = useStore((s) => s.removeRecentProject)
   const openWorkspaceFile = useStore((s) => s.openWorkspaceFile)
   const createWorkspaceFile = useStore((s) => s.createWorkspaceFile)
   const createWorkspaceFolder = useStore((s) => s.createWorkspaceFolder)
@@ -199,7 +235,6 @@ export default function Sidebar(): JSX.Element {
   const isRepo = Boolean(git)
   const branchName = git?.branch ?? ''
   const branchUrl = git?.branchUrl
-  const hasRemote = Boolean(git?.remoteUrl)
   const filteredFiles = workspace
     ? workspace.files.filter((file) => matchesWorkspaceFilter(file, workspaceFilter))
     : []
@@ -261,6 +296,11 @@ export default function Sidebar(): JSX.Element {
     if (name?.trim()) void createWorkspaceFolder(nestedPath(folder, name))
   }
 
+  const pickWorkspace = (kind: 'file' | 'project'): void => {
+    setAddProjectOpen(false)
+    void openWorkspace(kind)
+  }
+
   const requestNewWindow = (): void => {
     setWorkspaceMenu(null)
     setConfirmNewWindowOpen(true)
@@ -309,9 +349,21 @@ export default function Sidebar(): JSX.Element {
         }}
       >
         <button className="file-group-head" title={folder.path} onClick={() => toggleFolder(folder.path)}>
-          <span className={`folder-chevron ${collapsedFolders.has(folder.path) ? 'collapsed' : ''}`} />
-          <span className="folder-glyph" />
-          <span>{folder.name}</span>
+          <span className={`folder-chevron ${collapsedFolders.has(folder.path) ? 'collapsed' : ''}`} aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 4l4 4-4 4" />
+            </svg>
+          </span>
+          <span className="folder-glyph" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" stroke="none">
+              {collapsedFolders.has(folder.path) ? (
+                <path d="M2 4.4c0-.77.63-1.4 1.4-1.4h2.7c.46 0 .9.23 1.16.62l.5.78H12.6c.77 0 1.4.63 1.4 1.4v5.4c0 .77-.63 1.4-1.4 1.4H3.4C2.63 13 2 12.37 2 11.6z" />
+              ) : (
+                <path d="M2 4.4c0-.77.63-1.4 1.4-1.4h2.7c.46 0 .9.23 1.16.62l.5.78H12.6c.77 0 1.4.63 1.4 1.4v.6H2zM2 7h12.4l-1.1 4.9c-.13.6-.66 1.1-1.32 1.1H3.4c-.66 0-1.2-.46-1.36-1.1z" />
+              )}
+            </svg>
+          </span>
+          <span className="folder-name">{folder.name}</span>
           <span className="file-count">{folder.fileCount}</span>
         </button>
         <button
@@ -338,6 +390,148 @@ export default function Sidebar(): JSX.Element {
 
   return (
     <aside className="sidebar">
+      <nav className="side-nav" aria-label="Primary">
+        <button
+          className={`side-nav-item ${tasksOpen ? 'active' : ''}`}
+          title="Tasks"
+          onClick={() => {
+            setActiveNav('tasks')
+            toggleTasks(true)
+          }}
+        >
+          <span className="nav-ico" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 4.5h7M6 8h7M6 11.5h7" />
+              <path d="M2.6 4.5h.01M2.6 8h.01M2.6 11.5h.01" />
+            </svg>
+          </span>
+          <span className="nav-label">Tasks</span>
+        </button>
+        <button
+          className={`side-nav-item ${automationsOpen ? 'active' : ''}`}
+          title="Automations"
+          onClick={() => {
+            setActiveNav('automations')
+            toggleAutomations(true)
+          }}
+        >
+          <span className="nav-ico" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="8" cy="9" r="5" />
+              <path d="M8 6.6V9l1.7 1" />
+              <path d="M5.6 2.5 4 4M10.4 2.5 12 4" />
+            </svg>
+          </span>
+          <span className="nav-label">Automations</span>
+        </button>
+        <button
+          className={`side-nav-item ${historyOpen ? 'active' : ''}`}
+          title="Agent Session History"
+          onClick={() => {
+            setActiveNav(null)
+            toggleHistory(true)
+          }}
+        >
+          <span className="nav-ico" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 3.5A5 5 0 1 1 3.2 7" />
+              <path d="M3 3.5V7h3.4" />
+              <path d="M8 5.6V8l1.8 1" />
+            </svg>
+          </span>
+          <span className="nav-label">History</span>
+        </button>
+        <button className="side-nav-item soon" disabled title="Mobile — coming soon">
+          <span className="nav-ico" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="4.5" y="2" width="7" height="12" rx="1.6" />
+              <path d="M7 12h2" />
+            </svg>
+          </span>
+          <span className="nav-label">GenNal Mobile</span>
+          <span className="soon-pill">Soon</span>
+        </button>
+        <button className="side-nav-item" title="Search (Ctrl K)" onClick={() => togglePalette(true)}>
+          <span className="nav-ico" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="7" cy="7" r="4.2" />
+              <path d="M10.2 10.2 14 14" />
+            </svg>
+          </span>
+          <span className="nav-label">Search</span>
+        </button>
+      </nav>
+
+      <section className="side-sec projects-sec">
+        <div className="projects-top">
+          <span>Projects</span>
+          <button
+            className="projects-add"
+            title="Open another project"
+            aria-label="Open another project"
+            onClick={() => setAddProjectOpen(true)}
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+              <path d="M8 3v10M3 8h10" />
+            </svg>
+          </button>
+        </div>
+        <div className="projects-list">
+          {recentProjects.length === 0 ? (
+            <button className="projects-empty" onClick={() => setAddProjectOpen(true)}>
+              Open a project to get started
+            </button>
+          ) : (
+            recentProjects.map((project) => {
+              const active =
+                workspace?.kind === 'project' &&
+                workspace.path.toLowerCase() === project.path.toLowerCase()
+              return (
+                <div className={`project-row ${active ? 'active' : ''}`} key={project.path}>
+                  <button
+                    className="project-open"
+                    title={project.path}
+                    onClick={() => void openProject(project.path)}
+                  >
+                    <span className="project-mono" style={{ background: projectAccent(project.path) }}>
+                      {workspaceInitial(project.name)}
+                    </span>
+                    <span className="project-row-name">{project.name}</span>
+                  </button>
+                  <button
+                    className="project-remove"
+                    title="Remove from list"
+                    aria-label={`Remove ${project.name} from the list`}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      removeRecentProject(project.path)
+                    }}
+                  >
+                    <svg viewBox="0 0 14 14" width="12" height="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+                      <path d="M3.5 3.5 L10.5 10.5 M10.5 3.5 L3.5 10.5" />
+                    </svg>
+                  </button>
+                </div>
+              )
+            })
+          )}
+        </div>
+        <div className="projects-foot">
+          <button
+            className="projects-refresh"
+            title="Reload the current project"
+            aria-label="Reload the current project"
+            disabled={workspace?.kind !== 'project'}
+            onClick={() => workspace?.kind === 'project' && void openProject(workspace.path)}
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M13 3v3h-3" />
+              <path d="M13 6A5.5 5.5 0 1 0 13.5 9" />
+            </svg>
+          </button>
+        </div>
+      </section>
+
       <section className="side-sec">
         <div className="workspace-top">
           <span>Workspaces</span>
@@ -441,16 +635,9 @@ export default function Sidebar(): JSX.Element {
               title={git?.remoteUrl ?? `Current branch: ${branchName}`}
               onClick={openBranch}
             >
-              <span className="branch-icon" aria-hidden="true">
-                <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="4" y1="3" x2="4" y2="10" />
-                  <circle cx="4" cy="12" r="1.7" />
-                  <circle cx="12" cy="4" r="1.7" />
-                  <path d="M12 5.7c0 3.4-2.7 4.3-6 4.3" />
-                </svg>
-              </span>
+              <span className={`branch-status ${running > 0 ? 'on' : ''}`} aria-hidden="true" />
               <span className="branch-name">{branchName}</span>
-              <span className="branch-pill">{hasRemote ? 'remote' : 'local'}</span>
+              <span className="branch-pill primary">primary</span>
             </button>
           ) : (
             <div
@@ -461,7 +648,7 @@ export default function Sidebar(): JSX.Element {
               <span className="branch-name">{workspace ? 'No repository' : 'No project open'}</span>
             </div>
           )}
-          <button className="workspace-project" onClick={() => void openWorkspace('project')}>
+          <button className="workspace-project" onClick={() => setAddProjectOpen(true)}>
             <span className="project-indent" />
             <span className="project-icon">{workspaceInitial(workspaceName)}</span>
             <span className="project-name">{workspaceName}</span>
@@ -503,6 +690,33 @@ export default function Sidebar(): JSX.Element {
             <span className="workspace-open-arrow">›</span>
           </div>
         </div>
+        {sessions.length > 0 && (
+          <div className="ws-cards">
+            {sessions.map((session) => (
+              <button
+                key={session.id}
+                className={`ws-card ${activeId === session.id ? 'active' : ''}`}
+                title={session.label}
+                onClick={() => setActive(session.id)}
+              >
+                <span className="ws-card-head">
+                  <span
+                    className={`branch-status ${session.status === 'running' ? 'on' : session.status === 'error' ? 'err' : ''}`}
+                    style={{ color: session.accent }}
+                    aria-hidden="true"
+                  />
+                  <span className="ws-card-name">{session.label}</span>
+                  {activeId === session.id && <span className="branch-pill primary">primary</span>}
+                </span>
+                <span className="ws-card-sub">
+                  <span className="ws-card-glyph" aria-hidden="true" />
+                  <span className="ws-card-repo">{workspaceName}</span>
+                  <span className="ws-card-meta">{isRepo ? branchName : session.status}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         {workspaceMenu && (
           <div
             className="workspace-add-menu"
@@ -535,11 +749,11 @@ export default function Sidebar(): JSX.Element {
             </button>
             <button
               onClick={() => {
-                void openWorkspace('project')
+                setAddProjectOpen(true)
                 setWorkspaceMenu(null)
               }}
             >
-              Upload Project
+              Add Project...
             </button>
             <button
               onClick={() => {
@@ -565,7 +779,10 @@ export default function Sidebar(): JSX.Element {
                 <div className="file-more">No files match this filter</div>
               )}
               {filteredFiles.length > 120 && (
-                <div className="file-more">+{filteredFiles.length - 120} more files</div>
+                <div className="file-more file-more-count">
+                  <span className="file-more-dots" aria-hidden="true" />
+                  +{filteredFiles.length - 120} more files
+                </div>
               )}
             </div>
           )
@@ -686,44 +903,79 @@ export default function Sidebar(): JSX.Element {
         )}
       </section>
 
-      <section className="side-sec quick-actions-sec">
-        <div className="side-head"><span>QUICK ACTIONS</span></div>
-        <button className="qa" onClick={() => togglePalette(true)}>
-          <span className="qa-main">
-            <span className="qa-icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 4h10M3 8h10M3 12h6" />
-              </svg>
-            </span>
-            <span>Command Palette</span>
-          </span>
-          <kbd>Ctrl K</kbd>
-        </button>
-        <button className="qa" onClick={requestNewWindow}>
-          <span className="qa-main">
-            <span className="qa-icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="10" height="10" rx="1.5" />
-                <path d="M8 5.5v5M5.5 8h5" />
-              </svg>
-            </span>
-            <span>New Window</span>
-          </span>
-          <kbd>Ctrl N</kbd>
-        </button>
-        <button className="qa soon" disabled title="Mobile app — coming soon">
-          <span className="qa-main">
-            <span className="qa-icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="5" y="2" width="6" height="12" rx="1.4" />
-                <path d="M7.4 12h1.2" />
-              </svg>
-            </span>
-            <span>Mobile</span>
-          </span>
-          <span className="soon-pill">Coming soon</span>
-        </button>
-      </section>
+      {addProjectOpen && (
+        <div className="add-project-backdrop" onMouseDown={() => setAddProjectOpen(false)}>
+          <div
+            className="add-project-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-project-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="add-project-head">
+              <h2 id="add-project-title">Add a project</h2>
+              <button
+                className="add-project-close"
+                title="Close"
+                aria-label="Close add project"
+                onClick={() => setAddProjectOpen(false)}
+              >
+                <svg viewBox="0 0 14 14" width="14" height="14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+                  <path d="M3.5 3.5 L10.5 10.5 M10.5 3.5 L3.5 10.5" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="add-project-actions">
+              <button className="add-project-option primary" onClick={() => pickWorkspace('project')}>
+                <span className="add-project-icon" aria-hidden="true">
+                  <svg viewBox="0 0 18 18" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2.5 5.5a2 2 0 0 1 2-2h3l1.5 1.8h4.5a2 2 0 0 1 2 2v5.2a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2z" />
+                  </svg>
+                </span>
+                <span className="add-project-copy">
+                  <strong>Browse folder</strong>
+                  <span>Local project, Git repo, or folder with many repos</span>
+                </span>
+              </button>
+
+              <div className="add-project-label">Other ways to add</div>
+
+              <button className="add-project-option" onClick={() => pickWorkspace('file')}>
+                <span className="add-project-icon" aria-hidden="true">
+                  <svg viewBox="0 0 18 18" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10 2.5H5a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 5 15.5h8a1.5 1.5 0 0 0 1.5-1.5V7z" />
+                    <path d="M10 2.5V7h4.5" />
+                    <path d="M9 12V8.5M7.5 10l1.5-1.5 1.5 1.5" />
+                  </svg>
+                </span>
+                <span className="add-project-copy">
+                  <strong>Upload file</strong>
+                  <span>Open a single code or text file as the workspace</span>
+                </span>
+              </button>
+
+              <button
+                className="add-project-option"
+                onClick={() => {
+                  setAddProjectOpen(false)
+                  promptNewFolder()
+                }}
+              >
+                <span className="add-project-icon" aria-hidden="true">
+                  <svg viewBox="0 0 18 18" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                    <path d="M9 4v10M4 9h10" />
+                  </svg>
+                </span>
+                <span className="add-project-copy">
+                  <strong>Create new project</strong>
+                  <span>Start from an empty folder in the current project</span>
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmNewWindowOpen && (
         <div className="confirm-popover-backdrop" onMouseDown={() => setConfirmNewWindowOpen(false)}>
