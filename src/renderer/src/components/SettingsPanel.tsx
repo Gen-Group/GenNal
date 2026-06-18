@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { useStore, type PanelSide, type ThemeName } from '../store'
+import { useStore, type NotificationSound, type PanelSide, type ThemeName } from '../store'
 import UsageDetail from './UsageDetail'
 
 const THEME_OPTIONS: { id: ThemeName; label: string; hint: string }[] = [
@@ -199,6 +199,13 @@ const TERMINAL_FONT_OPTIONS = [
 ]
 
 const TERMINAL_SCROLLBACK_OPTIONS = [1000, 2000, 5000, 10000]
+
+const NOTIFICATION_SOUND_OPTIONS: { id: NotificationSound; label: string }[] = [
+  { id: 'system', label: 'System Default' },
+  { id: 'chime', label: 'Chime' },
+  { id: 'ping', label: 'Ping' },
+  { id: 'none', label: 'None (silent)' }
+]
 
 interface TaskSourceConfig {
   id: TaskSourceId
@@ -444,6 +451,103 @@ function formatHistoryDate(value: string): string {
   })
 }
 
+// ---- Keyboard shortcuts ----
+interface ShortcutBinding {
+  id: string
+  label: string
+  group: string
+  keys: string
+  defaultKeys: string
+}
+
+type ShortcutStatus = 'all' | 'modified' | 'unassigned' | 'conflicts'
+type TerminalPrecedence = 'app' | 'terminal'
+
+const SHORTCUTS_STORAGE = 'gennal.shortcutBindings'
+const TERMINAL_PRECEDENCE_STORAGE = 'gennal.shortcutTerminalPrecedence'
+
+const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
+  { id: 'palette', label: 'Command Palette', group: 'Global', defaultKeys: 'Ctrl+K', keys: 'Ctrl+K' },
+  { id: 'new-window', label: 'New Window', group: 'Global', defaultKeys: 'Ctrl+N', keys: 'Ctrl+N' },
+  { id: 'search', label: 'Search', group: 'Global', defaultKeys: 'Ctrl+P', keys: 'Ctrl+P' },
+  { id: 'open-settings', label: 'Open Settings', group: 'Global', defaultKeys: 'Ctrl+,', keys: 'Ctrl+,' },
+  { id: 'force-reload', label: 'Force Reload', group: 'Global', defaultKeys: 'Ctrl+Shift+R', keys: 'Ctrl+Shift+R' },
+  { id: 'toggle-sidebar', label: 'Toggle Sidebar', group: 'View', defaultKeys: 'Ctrl+B', keys: 'Ctrl+B' },
+  { id: 'toggle-panel', label: 'Toggle Side Panel', group: 'View', defaultKeys: 'Ctrl+J', keys: 'Ctrl+J' },
+  { id: 'zoom-in', label: 'Zoom In', group: 'View', defaultKeys: 'Ctrl++', keys: 'Ctrl++' },
+  { id: 'zoom-out', label: 'Zoom Out', group: 'View', defaultKeys: 'Ctrl+-', keys: 'Ctrl+-' },
+  { id: 'zoom-reset', label: 'Reset Zoom', group: 'View', defaultKeys: 'Ctrl+0', keys: 'Ctrl+0' },
+  { id: 'open-tasks', label: 'Open Tasks', group: 'View', defaultKeys: '', keys: '' },
+  { id: 'open-automations', label: 'Open Automations', group: 'View', defaultKeys: '', keys: '' },
+  { id: 'open-history', label: 'Open History', group: 'View', defaultKeys: '', keys: '' },
+  { id: 'new-session', label: 'New Session', group: 'Terminal', defaultKeys: 'Ctrl+Shift+T', keys: 'Ctrl+Shift+T' },
+  { id: 'close-session', label: 'Close Session', group: 'Terminal', defaultKeys: 'Ctrl+Shift+W', keys: 'Ctrl+Shift+W' },
+  { id: 'next-session', label: 'Next Session', group: 'Terminal', defaultKeys: 'Ctrl+Shift+]', keys: 'Ctrl+Shift+]' },
+  { id: 'prev-session', label: 'Previous Session', group: 'Terminal', defaultKeys: 'Ctrl+Shift+[', keys: 'Ctrl+Shift+[' },
+  { id: 'clear-terminal', label: 'Clear Terminal', group: 'Terminal', defaultKeys: '', keys: '' },
+  { id: 'rename-session', label: 'Rename Session', group: 'Terminal', defaultKeys: '', keys: '' }
+]
+
+function loadShortcuts(): ShortcutBinding[] {
+  try {
+    const raw = window.localStorage.getItem(SHORTCUTS_STORAGE)
+    if (!raw) return DEFAULT_SHORTCUTS.map((s) => ({ ...s }))
+    const parsed = JSON.parse(raw) as Partial<ShortcutBinding>[]
+    const saved = new Map(
+      (Array.isArray(parsed) ? parsed : [])
+        .filter((s) => typeof s?.id === 'string' && typeof s.keys === 'string')
+        .map((s) => [s.id as string, s.keys as string])
+    )
+    // Defaults are the source of truth for which commands exist; saved overrides keys only.
+    return DEFAULT_SHORTCUTS.map((s) => ({ ...s, keys: saved.get(s.id) ?? s.keys }))
+  } catch {
+    return DEFAULT_SHORTCUTS.map((s) => ({ ...s }))
+  }
+}
+
+function saveShortcuts(bindings: ShortcutBinding[]): void {
+  try {
+    const payload = bindings.map((s) => ({ id: s.id, keys: s.keys }))
+    window.localStorage.setItem(SHORTCUTS_STORAGE, JSON.stringify(payload))
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+function loadTerminalPrecedence(): TerminalPrecedence {
+  return window.localStorage.getItem(TERMINAL_PRECEDENCE_STORAGE) === 'terminal' ? 'terminal' : 'app'
+}
+
+const MODIFIER_KEYS = new Set(['Control', 'Meta', 'Alt', 'Shift'])
+
+/** Convert a keydown into a normalized combo like "Ctrl+Shift+P", or null for a lone modifier. */
+function eventToCombo(e: KeyboardEvent): string | null {
+  if (MODIFIER_KEYS.has(e.key)) return null
+  const parts: string[] = []
+  if (e.ctrlKey) parts.push('Ctrl')
+  if (e.metaKey) parts.push('Cmd')
+  if (e.altKey) parts.push('Alt')
+  if (e.shiftKey) parts.push('Shift')
+  let main = e.key
+  if (main === ' ') main = 'Space'
+  else if (main.length === 1) main = main.toUpperCase()
+  parts.push(main)
+  return parts.join('+')
+}
+
+const KEY_GLYPHS: Record<string, string> = {
+  ArrowUp: '↑',
+  ArrowDown: '↓',
+  ArrowLeft: '←',
+  ArrowRight: '→',
+  Cmd: '⌘'
+}
+
+function comboParts(keys: string): string[] {
+  if (!keys) return []
+  return keys.split('+').map((part) => KEY_GLYPHS[part] ?? part)
+}
+
 export default function SettingsPanel(): JSX.Element | null {
   const open = useStore((s) => s.settingsOpen)
   const toggleSettings = useStore((s) => s.toggleSettings)
@@ -471,6 +575,8 @@ export default function SettingsPanel(): JSX.Element | null {
   const clearChatHistory = useStore((s) => s.clearChatHistory)
   const editorSettings = useStore((s) => s.editorSettings)
   const setEditorSettings = useStore((s) => s.setEditorSettings)
+  const notificationSettings = useStore((s) => s.notificationSettings)
+  const setNotificationSettings = useStore((s) => s.setNotificationSettings)
   const clearLocalData = useStore((s) => s.clearLocalData)
   const models = useStore((s) => s.models)
   const sessions = useStore((s) => s.sessions)
@@ -493,6 +599,56 @@ export default function SettingsPanel(): JSX.Element | null {
   const [serverError, setServerError] = useState('')
   const [usageDetailId, setUsageDetailId] = useState<string | null>(null)
   const [dataCleared, setDataCleared] = useState(false)
+  const [notificationTest, setNotificationTest] = useState('')
+  const [shortcuts, setShortcuts] = useState<ShortcutBinding[]>(loadShortcuts)
+  const [shortcutQuery, setShortcutQuery] = useState('')
+  const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatus>('all')
+  const [recordingId, setRecordingId] = useState<string | null>(null)
+  const [terminalPrecedence, setTerminalPrecedence] = useState<TerminalPrecedence>(loadTerminalPrecedence)
+
+  const updateShortcut = (id: string, keys: string): void => {
+    setShortcuts((prev) => {
+      const next = prev.map((s) => (s.id === id ? { ...s, keys } : s))
+      saveShortcuts(next)
+      return next
+    })
+  }
+
+  const resetShortcuts = (): void => {
+    const next = DEFAULT_SHORTCUTS.map((s) => ({ ...s }))
+    setShortcuts(next)
+    saveShortcuts(next)
+    setRecordingId(null)
+  }
+
+  const chooseTerminalPrecedence = (value: TerminalPrecedence): void => {
+    setTerminalPrecedence(value)
+    window.localStorage.setItem(TERMINAL_PRECEDENCE_STORAGE, value)
+  }
+
+  // While recording, the next key combo is captured for the active row.
+  useEffect(() => {
+    if (!recordingId) return
+    const onKey = (e: KeyboardEvent): void => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.key === 'Escape') {
+        setRecordingId(null)
+        return
+      }
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        updateShortcut(recordingId, '')
+        setRecordingId(null)
+        return
+      }
+      const combo = eventToCombo(e)
+      if (!combo) return
+      updateShortcut(recordingId, combo)
+      setRecordingId(null)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [recordingId])
 
   useEffect(() => {
     if (!priorityMenuOpen) return
@@ -519,6 +675,42 @@ export default function SettingsPanel(): JSX.Element | null {
   const activeGroup = GROUPS.find((group) => group.items.some((item) => item.id === active))
   const activeItem = activeGroup?.items.find((item) => item.id === active)
   const activeTaskSourceCount = taskSettings.sources.filter((source) => source.enabled).length
+
+  // ---- derived shortcut data ----
+  const shortcutKeyCounts = new Map<string, number>()
+  for (const s of shortcuts) {
+    if (s.keys) shortcutKeyCounts.set(s.keys, (shortcutKeyCounts.get(s.keys) ?? 0) + 1)
+  }
+  const isConflict = (s: ShortcutBinding): boolean => Boolean(s.keys) && (shortcutKeyCounts.get(s.keys) ?? 0) > 1
+  const isModified = (s: ShortcutBinding): boolean => s.keys !== s.defaultKeys
+  const shortcutCounts = {
+    all: shortcuts.length,
+    modified: shortcuts.filter(isModified).length,
+    unassigned: shortcuts.filter((s) => !s.keys).length,
+    conflicts: shortcuts.filter(isConflict).length
+  }
+  const normalizedQuery = shortcutQuery.trim().toLowerCase()
+  const filteredShortcuts = shortcuts.filter((s) => {
+    if (shortcutStatus === 'modified' && !isModified(s)) return false
+    if (shortcutStatus === 'unassigned' && s.keys) return false
+    if (shortcutStatus === 'conflicts' && !isConflict(s)) return false
+    if (!normalizedQuery) return true
+    return (
+      s.label.toLowerCase().includes(normalizedQuery) ||
+      s.keys.toLowerCase().includes(normalizedQuery) ||
+      s.group.toLowerCase().includes(normalizedQuery)
+    )
+  })
+  const shortcutGroups = Array.from(new Set(filteredShortcuts.map((s) => s.group))).map((group) => ({
+    group,
+    items: filteredShortcuts.filter((s) => s.group === group)
+  }))
+  const shortcutStatusFilters: { id: ShortcutStatus; label: string; count: number }[] = [
+    { id: 'all', label: 'All', count: shortcutCounts.all },
+    { id: 'modified', label: 'Modified', count: shortcutCounts.modified },
+    { id: 'unassigned', label: 'Unassigned', count: shortcutCounts.unassigned },
+    { id: 'conflicts', label: 'Conflicts', count: shortcutCounts.conflicts }
+  ]
 
   const updateTaskSettings = (updater: (settings: TaskSourceSettings) => TaskSourceSettings): void => {
     setTaskSettings((current) => {
@@ -623,6 +815,31 @@ export default function SettingsPanel(): JSX.Element | null {
     addSession(modelId)
     setUsageDetailId(null)
     toggleSettings(false)
+  }
+
+  const sendTestNotification = (): void => {
+    if (typeof Notification === 'undefined') {
+      setNotificationTest('Notifications are not supported on this device.')
+      return
+    }
+    const show = (): void => {
+      const sound = notificationSettings.sound
+      new Notification('GenNal', {
+        body: 'This is a test notification.',
+        silent: sound === 'none'
+      })
+      setNotificationTest('Test notification sent.')
+    }
+    if (Notification.permission === 'granted') {
+      show()
+    } else if (Notification.permission === 'denied') {
+      setNotificationTest('Notifications are blocked. Enable them in your system settings.')
+    } else {
+      void Notification.requestPermission().then((permission) => {
+        if (permission === 'granted') show()
+        else setNotificationTest('Notification permission was not granted.')
+      })
+    }
   }
 
   return (
@@ -1559,6 +1776,121 @@ export default function SettingsPanel(): JSX.Element | null {
 
               <p className="remote-note">Privacy preferences are stored locally on this device.</p>
             </div>
+          ) : active === 'notifications' ? (
+            <div className="settings-content notifications-panel">
+              <div className="settings-section-head">
+                <h4>Notifications</h4>
+                <p>Native desktop notifications for agent activity and terminal events.</p>
+              </div>
+
+              <div className="settings-card">
+                <div>
+                  <h3>Enable Notifications</h3>
+                  <p>Native system notifications for background events.</p>
+                </div>
+                <button
+                  className={`task-toggle ${notificationSettings.enabled ? 'on' : ''}`}
+                  aria-pressed={notificationSettings.enabled}
+                  aria-label="Enable Notifications"
+                  onClick={() => setNotificationSettings({ enabled: !notificationSettings.enabled })}
+                >
+                  <span />
+                </button>
+              </div>
+
+              <div className={`settings-card${notificationSettings.enabled ? '' : ' is-disabled'}`}>
+                <div>
+                  <h3 className="settings-card-title">
+                    <NavIcon name="check" />
+                    Agent Task Complete
+                  </h3>
+                  <p>A coding agent finishes and becomes idle.</p>
+                </div>
+                <button
+                  className={`task-toggle ${notificationSettings.agentTaskComplete ? 'on' : ''}`}
+                  aria-pressed={notificationSettings.agentTaskComplete}
+                  aria-label="Agent Task Complete"
+                  disabled={!notificationSettings.enabled}
+                  onClick={() =>
+                    setNotificationSettings({ agentTaskComplete: !notificationSettings.agentTaskComplete })
+                  }
+                >
+                  <span />
+                </button>
+              </div>
+
+              <div className={`settings-card${notificationSettings.enabled ? '' : ' is-disabled'}`}>
+                <div>
+                  <h3 className="settings-card-title">
+                    <NavIcon name="bell" />
+                    Terminal Bell
+                  </h3>
+                  <p>A background terminal emits a bell character.</p>
+                </div>
+                <button
+                  className={`task-toggle ${notificationSettings.terminalBell ? 'on' : ''}`}
+                  aria-pressed={notificationSettings.terminalBell}
+                  aria-label="Terminal Bell"
+                  disabled={!notificationSettings.enabled}
+                  onClick={() => setNotificationSettings({ terminalBell: !notificationSettings.terminalBell })}
+                >
+                  <span />
+                </button>
+              </div>
+
+              <div className={`settings-card notification-sound-card${notificationSettings.enabled ? '' : ' is-disabled'}`}>
+                <div>
+                  <h3 className="settings-card-title">
+                    <NavIcon name="terminal" />
+                    Notification Sound
+                  </h3>
+                  <p>Choose the alert GenNal plays when a desktop notification is delivered.</p>
+                  <select
+                    className="settings-select"
+                    value={notificationSettings.sound}
+                    disabled={!notificationSettings.enabled}
+                    onChange={(event) =>
+                      setNotificationSettings({ sound: event.target.value as NotificationSound })
+                    }
+                    aria-label="Notification Sound"
+                  >
+                    {NOTIFICATION_SOUND_OPTIONS.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className={`settings-card${notificationSettings.enabled ? '' : ' is-disabled'}`}>
+                <div>
+                  <h3>Suppress While Focused</h3>
+                  <p>Skip notifications when the triggering worktree is already visible.</p>
+                </div>
+                <button
+                  className={`task-toggle ${notificationSettings.suppressWhileFocused ? 'on' : ''}`}
+                  aria-pressed={notificationSettings.suppressWhileFocused}
+                  aria-label="Suppress While Focused"
+                  disabled={!notificationSettings.enabled}
+                  onClick={() =>
+                    setNotificationSettings({ suppressWhileFocused: !notificationSettings.suppressWhileFocused })
+                  }
+                >
+                  <span />
+                </button>
+              </div>
+
+              <div className="settings-test-row">
+                <button className="settings-close" onClick={sendTestNotification}>
+                  <NavIcon name="bell" />
+                  Send Test Notification
+                </button>
+                {notificationTest && <span className="settings-test-note">{notificationTest}</span>}
+              </div>
+
+              <p className="remote-note">Notification preferences are stored locally on this device.</p>
+            </div>
           ) : active === 'input' ? (
             <div className="settings-content editor-panel">
               <div className="settings-summary-grid">
@@ -1668,6 +2000,126 @@ export default function SettingsPanel(): JSX.Element | null {
               </div>
 
               <p className="remote-note">Editor preferences are stored locally on this device.</p>
+            </div>
+          ) : active === 'shortcuts' ? (
+            <div className="settings-content shortcuts-panel">
+              <div className="settings-card shortcuts-precedence">
+                <div>
+                  <h3>Shortcuts in Terminal</h3>
+                  <p>Decide who first intercepts shortcuts while a terminal is focused.</p>
+                </div>
+                <div className="settings-grid-actions">
+                  <button
+                    className={terminalPrecedence === 'app' ? 'active' : ''}
+                    onClick={() => chooseTerminalPrecedence('app')}
+                  >
+                    GenNal first
+                  </button>
+                  <button
+                    className={terminalPrecedence === 'terminal' ? 'active' : ''}
+                    onClick={() => chooseTerminalPrecedence('terminal')}
+                  >
+                    Terminal first
+                  </button>
+                </div>
+              </div>
+
+              <div className="shortcuts-toolbar">
+                <div className="shortcut-search">
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+                    <circle cx="7" cy="7" r="4.5" />
+                    <path d="M10.5 10.5 14 14" />
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Search command or keys"
+                    value={shortcutQuery}
+                    onChange={(event) => setShortcutQuery(event.target.value)}
+                  />
+                  <span className="shortcut-count">
+                    {filteredShortcuts.length}/{shortcuts.length}
+                  </span>
+                </div>
+                <button className="shortcut-reset-all" onClick={resetShortcuts}>
+                  Reset to defaults
+                </button>
+              </div>
+
+              <div className="shortcut-status-filters">
+                {shortcutStatusFilters.map((filter) => (
+                  <button
+                    key={filter.id}
+                    className={`shortcut-status-chip ${shortcutStatus === filter.id ? 'active' : ''}`}
+                    onClick={() => setShortcutStatus(filter.id)}
+                  >
+                    <span>{filter.label}</span>
+                    <span className="shortcut-status-count">{filter.count}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="shortcut-groups">
+                {shortcutGroups.length === 0 ? (
+                  <p className="shortcut-empty">No shortcuts match your search.</p>
+                ) : (
+                  shortcutGroups.map(({ group, items }) => (
+                    <div className="shortcut-group" key={group}>
+                      <div className="shortcut-group-title">{group}</div>
+                      {items.map((s) => {
+                        const recording = recordingId === s.id
+                        const conflict = isConflict(s)
+                        return (
+                          <div className={`shortcut-row ${conflict ? 'conflict' : ''}`} key={s.id}>
+                            <div className="shortcut-row-info">
+                              <span className="shortcut-row-label">{s.label}</span>
+                              <span className="shortcut-scope">{group}</span>
+                            </div>
+                            <div className="shortcut-row-keys">
+                              {recording ? (
+                                <button className="shortcut-keys recording" onClick={() => setRecordingId(null)}>
+                                  Press keys… (Esc to cancel)
+                                </button>
+                              ) : s.keys ? (
+                                <button
+                                  className="shortcut-keys"
+                                  title="Click to re-record"
+                                  onClick={() => setRecordingId(s.id)}
+                                >
+                                  {comboParts(s.keys).map((part, index) => (
+                                    <kbd key={index}>{part}</kbd>
+                                  ))}
+                                </button>
+                              ) : (
+                                <button className="shortcut-add" onClick={() => setRecordingId(s.id)}>
+                                  <svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+                                    <path d="M7 2.5v9M2.5 7h9" />
+                                  </svg>
+                                  Add shortcut
+                                </button>
+                              )}
+                              {isModified(s) && !recording && (
+                                <button
+                                  className="shortcut-row-reset"
+                                  title="Reset to default"
+                                  aria-label={`Reset ${s.label} to default`}
+                                  onClick={() => updateShortcut(s.id, s.defaultKeys)}
+                                >
+                                  <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                    <path d="M13 3v3h-3" />
+                                    <path d="M13 6A5.5 5.5 0 1 0 13.5 9" />
+                                  </svg>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <p className="remote-note">Shortcuts are stored locally on this device.</p>
             </div>
           ) : (
             <div className="settings-placeholder">

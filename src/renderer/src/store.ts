@@ -20,11 +20,17 @@ export interface Session {
   command: string
   status: SessionStatus
   cwd?: string
+  /**
+   * Path of the project this terminal belongs to, captured when it was created.
+   * Sessions are scoped to their project: switching projects shows only that
+   * project's terminals. `undefined` means it was created with no project open.
+   */
+  projectPath?: string
 }
 
 export type LayoutMode = 'grid' | 'tabs' | 'stack' | 'float'
 export type PanelSide = 'left' | 'right'
-export type CodePanelTab = 'CODE' | 'CHAT' | 'OUTPUT' | 'TERMINAL' | 'PROBLEMS'
+export type CodePanelTab = 'CODE' | 'CHAT' | 'OUTPUT' | 'TERMINAL' | 'PROBLEMS' | 'PREVIEW'
 export type ThemeName =
   | 'dark'
   | 'light'
@@ -104,6 +110,18 @@ export function scrollbackLines(s: TerminalSettings): number {
   return Math.min(500_000, Math.max(1000, Math.round((s.scrollbackMB || 10) * 1000)))
 }
 
+/** True when a path looks like a standalone web page we can open directly. */
+function isHtmlPath(path: string): boolean {
+  return /\.(html?|xhtml)$/i.test(path)
+}
+
+/** Convert an absolute OS path into a file:// URL the webview can load. */
+function toFileUrl(path: string): string {
+  const normalised = path.replace(/\\/g, '/')
+  const withSlash = normalised.startsWith('/') ? normalised : `/${normalised}`
+  return `file://${encodeURI(withSlash).replace(/#/g, '%23').replace(/\?/g, '%3F')}`
+}
+
 /** Resolve the OS shell command for a Windows-shell preference (renderer side). */
 export function windowsShellCommand(shell: WindowsShell): string {
   switch (shell) {
@@ -134,6 +152,16 @@ export interface EditorSettings {
   wordWrap: boolean
   lineNumbers: boolean
   spellCheck: boolean
+}
+
+export type NotificationSound = 'system' | 'chime' | 'ping' | 'none'
+
+export interface NotificationSettings {
+  enabled: boolean
+  agentTaskComplete: boolean
+  terminalBell: boolean
+  sound: NotificationSound
+  suppressWhileFocused: boolean
 }
 
 export interface ImagePreview {
@@ -278,6 +306,7 @@ interface AppState {
   terminalSettings: TerminalSettings
   privacySettings: PrivacySettings
   editorSettings: EditorSettings
+  notificationSettings: NotificationSettings
   profileSetupOpen: boolean
   workspace: WorkspaceOpenResult | null
   workspaceError: string | null
@@ -285,6 +314,10 @@ interface AppState {
   imagePreview: ImagePreview | null
   runOutput: RunOutput[]
   running: boolean
+  /** URL currently loaded in the in-app website preview (null = home page). */
+  previewUrl: string | null
+  /** Bumped to force the preview <webview> to reload the same URL. */
+  previewNonce: number
   chatHistory: ChatHistoryEntry[]
 
   setModels: (m: ModelDef[]) => void
@@ -323,6 +356,7 @@ interface AppState {
   setTerminalSettings: (settings: Partial<TerminalSettings>) => void
   setPrivacySettings: (settings: Partial<PrivacySettings>) => void
   setEditorSettings: (settings: Partial<EditorSettings>) => void
+  setNotificationSettings: (settings: Partial<NotificationSettings>) => void
   clearLocalData: () => void
   addChatHistoryEntry: (entry: Omit<ChatHistoryEntry, 'id' | 'createdAt'>) => void
   clearChatHistory: () => void
@@ -344,6 +378,8 @@ interface AppState {
   appendRunOutput: (output: RunOutput) => void
   finishRun: (exit: RunExit) => void
   clearRunOutput: () => void
+  /** Load a URL in the preview tab, opening the code panel and switching to it. */
+  openPreview: (url: string) => void
   applyCode: (code: string, suggestedName?: string) => Promise<ApplyCodeResult>
 }
 
@@ -671,6 +707,16 @@ const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   spellCheck: false
 }
 
+const NOTIFICATION_STORAGE = 'gennal.notificationSettings'
+const NOTIFICATION_SOUNDS: NotificationSound[] = ['system', 'chime', 'ping', 'none']
+const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
+  enabled: true,
+  agentTaskComplete: true,
+  terminalBell: false,
+  sound: 'system',
+  suppressWhileFocused: true
+}
+
 function loadProfile(): Profile {
   try {
     const raw = window.localStorage.getItem('gennal.profile')
@@ -826,6 +872,27 @@ function loadEditorSettings(): EditorSettings {
   }
 }
 
+function loadNotificationSettings(): NotificationSettings {
+  try {
+    const raw = window.localStorage.getItem(NOTIFICATION_STORAGE)
+    if (!raw) return DEFAULT_NOTIFICATION_SETTINGS
+    const parsed = JSON.parse(raw) as Partial<NotificationSettings>
+    const bool = (key: keyof NotificationSettings): boolean =>
+      typeof parsed[key] === 'boolean' ? (parsed[key] as boolean) : (DEFAULT_NOTIFICATION_SETTINGS[key] as boolean)
+    return {
+      enabled: bool('enabled'),
+      agentTaskComplete: bool('agentTaskComplete'),
+      terminalBell: bool('terminalBell'),
+      sound: NOTIFICATION_SOUNDS.includes(parsed.sound as NotificationSound)
+        ? (parsed.sound as NotificationSound)
+        : DEFAULT_NOTIFICATION_SETTINGS.sound,
+      suppressWhileFocused: bool('suppressWhileFocused')
+    }
+  } catch {
+    return DEFAULT_NOTIFICATION_SETTINGS
+  }
+}
+
 function loadChatHistory(): ChatHistoryEntry[] {
   try {
     const raw = window.localStorage.getItem(CHAT_HISTORY_STORAGE)
@@ -872,7 +939,7 @@ function clearChatHistoryStorage(): void {
 
 const TERMINAL_ACCENTS = ['#22c55e', '#2f8cff', '#7c3aed', '#f97316']
 
-function createSession(model: ModelDef, index: number, cwd?: string): Session {
+function createSession(model: ModelDef, index: number, cwd?: string, projectPath?: string): Session {
   return {
     id: uid(),
     modelId: model.id,
@@ -881,8 +948,28 @@ function createSession(model: ModelDef, index: number, cwd?: string): Session {
     accent: TERMINAL_ACCENTS[index % TERMINAL_ACCENTS.length] ?? model.accent,
     command: model.command,
     status: 'idle',
-    cwd
+    cwd,
+    projectPath
   }
+}
+
+/** The active project's path, or `undefined` when a file / no workspace is open. */
+export function activeProjectPath(workspace: WorkspaceOpenResult | null): string | undefined {
+  return workspace?.kind === 'project' ? workspace.path : undefined
+}
+
+/**
+ * Keep the active terminal valid for the project being shown: preserve the
+ * current selection if it belongs to `projectPath`, otherwise fall back to that
+ * project's first terminal (or null when it has none).
+ */
+function scopedActiveId(
+  sessions: Session[],
+  activeId: string | null,
+  projectPath?: string
+): string | null {
+  if (sessions.some((s) => s.id === activeId && s.projectPath === projectPath)) return activeId
+  return sessions.find((s) => s.projectPath === projectPath)?.id ?? null
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -915,6 +1002,7 @@ export const useStore = create<AppState>((set, get) => ({
   terminalSettings: loadTerminalSettings(),
   privacySettings: loadPrivacySettings(),
   editorSettings: loadEditorSettings(),
+  notificationSettings: loadNotificationSettings(),
   profileSetupOpen: loadProfile().name === '',
   workspace: null,
   workspaceError: null,
@@ -922,6 +1010,8 @@ export const useStore = create<AppState>((set, get) => ({
   imagePreview: null,
   runOutput: [],
   running: false,
+  previewUrl: null,
+  previewNonce: 0,
   chatHistory: loadChatHistory(),
 
   setModels: (models) => set({ models }),
@@ -969,11 +1059,8 @@ export const useStore = create<AppState>((set, get) => ({
   addSession: (modelId) => {
     const model = get().models.find((m) => m.id === modelId)
     if (!model) return
-    const session = createSession(
-      model,
-      get().sessions.length,
-      get().workspace?.kind === 'project' ? get().workspace?.path : undefined
-    )
+    const projectPath = activeProjectPath(get().workspace)
+    const session = createSession(model, get().sessions.length, projectPath, projectPath)
     set((s) => ({
       sessions: [...s.sessions, session],
       activeId: s.terminalSettings.focusNewSessions ? session.id : s.activeId
@@ -1311,6 +1398,18 @@ export const useStore = create<AppState>((set, get) => ({
     })
   },
 
+  setNotificationSettings: (settings) => {
+    set((s) => {
+      const next: NotificationSettings = { ...s.notificationSettings, ...settings }
+      try {
+        window.localStorage.setItem(NOTIFICATION_STORAGE, JSON.stringify(next))
+      } catch {
+        /* ignore storage errors */
+      }
+      return { notificationSettings: next }
+    })
+  },
+
   clearLocalData: () => {
     try {
       // Wipe stored data (workspace refs, remote servers, task sources, history)
@@ -1323,6 +1422,7 @@ export const useStore = create<AppState>((set, get) => ({
         'gennal.terminalSettings',
         'gennal.privacySettings',
         'gennal.editorSettings',
+        'gennal.notificationSettings',
         'gennal.panelSide',
         'gennal.panelWidth',
         'gennal.panelOpen',
@@ -1371,7 +1471,11 @@ export const useStore = create<AppState>((set, get) => ({
       if (workspace) {
         saveWorkspaceRef(workspace)
         rememberProject(set, get, workspace)
-        set({ workspace, workspaceError: null })
+        set((s) => ({
+          workspace,
+          workspaceError: null,
+          activeId: scopedActiveId(s.sessions, s.activeId, activeProjectPath(workspace))
+        }))
       }
     } catch (err) {
       set({ workspaceError: err instanceof Error ? err.message : 'Unable to open workspace.' })
@@ -1385,7 +1489,12 @@ export const useStore = create<AppState>((set, get) => ({
       const workspace = await window.api.openWorkspacePath({ kind: 'project', path })
       saveWorkspaceRef(workspace)
       rememberProject(set, get, workspace)
-      set({ workspace, workspaceError: null, imagePreview: null })
+      set((s) => ({
+        workspace,
+        workspaceError: null,
+        imagePreview: null,
+        activeId: scopedActiveId(s.sessions, s.activeId, activeProjectPath(workspace))
+      }))
     } catch (err) {
       set({ workspaceError: err instanceof Error ? err.message : 'Unable to open project.' })
     }
@@ -1412,7 +1521,11 @@ export const useStore = create<AppState>((set, get) => ({
       const workspace = await window.api.openWorkspacePath(saved)
       saveWorkspaceRef(workspace)
       rememberProject(set, get, workspace)
-      set({ workspace, workspaceError: null })
+      set((s) => ({
+        workspace,
+        workspaceError: null,
+        activeId: scopedActiveId(s.sessions, s.activeId, activeProjectPath(workspace))
+      }))
     } catch (err) {
       clearWorkspaceRef()
       set({
@@ -1555,6 +1668,13 @@ export const useStore = create<AppState>((set, get) => ({
     const saved = await get().saveWorkspaceFile(workspace.content ?? '')
     if (!saved) return
 
+    // A web page has no interpreter — preview it in the in-app browser instead
+    // of handing it to the console runner.
+    if (isHtmlPath(selectedFile.path)) {
+      get().openPreview(toFileUrl(selectedFile.path))
+      return
+    }
+
     set({ runOutput: [], running: true })
     window.api.runStart({
       filePath: selectedFile.path,
@@ -1580,6 +1700,15 @@ export const useStore = create<AppState>((set, get) => ({
     }),
 
   clearRunOutput: () => set({ runOutput: [] }),
+
+  openPreview: (url) => {
+    set((s) => ({
+      previewUrl: url,
+      previewNonce: s.previewNonce + 1,
+      codePanelTab: 'PREVIEW',
+      panelOpen: true
+    }))
+  },
 
   // Apply a code block that the AI returned. With a file open in the editor we
   // overwrite it; inside a project with no file open we create `suggestedName`

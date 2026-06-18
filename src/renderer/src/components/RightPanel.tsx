@@ -10,8 +10,9 @@ import {
 import { useStore, type CodePanelTab } from '../store'
 import PanelTerminal from './PanelTerminal'
 import ChatPanel from './ChatPanel'
+import BrowserPreview from './BrowserPreview'
 
-const CODE_TABS: CodePanelTab[] = ['CODE', 'CHAT', 'OUTPUT', 'TERMINAL', 'PROBLEMS']
+const CODE_TABS: CodePanelTab[] = ['CODE', 'CHAT', 'OUTPUT', 'PREVIEW', 'TERMINAL', 'PROBLEMS']
 
 const SAMPLE = `import 'package:flutter/material.dart';
 
@@ -74,6 +75,7 @@ function highlightLine(line: string): JSX.Element[] {
 export default function RightPanel(): JSX.Element {
   const [terminalMounted, setTerminalMounted] = useState(false)
   const [chatMounted, setChatMounted] = useState(false)
+  const [previewMounted, setPreviewMounted] = useState(false)
   const [scroll, setScroll] = useState({ left: 0, top: 0 })
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const codeTab = useStore((s) => s.codePanelTab)
@@ -199,10 +201,13 @@ export default function RightPanel(): JSX.Element {
     // Keep the chat panel mounted once opened so its messages, draft input and
     // any in-flight reply survive switching to OUTPUT or other tabs.
     if (codeTab === 'CHAT') setChatMounted(true)
+    // Keep the website preview alive across tab switches so its page, history and
+    // scroll position survive (and a running dev server isn't reloaded).
+    if (codeTab === 'PREVIEW') setPreviewMounted(true)
   }, [codeTab])
 
   useEffect(() => {
-    if (panelMaximized && codeTab !== 'CODE' && codeTab !== 'CHAT') {
+    if (panelMaximized && codeTab !== 'CODE' && codeTab !== 'CHAT' && codeTab !== 'PREVIEW') {
       setCodeTab('CODE')
     }
   }, [codeTab, panelMaximized, setCodeTab])
@@ -241,7 +246,9 @@ export default function RightPanel(): JSX.Element {
     return () => window.clearTimeout(timeout)
   }, [code, saveWorkspaceFile, selectedFile, workspace?.kind])
 
-  const visibleTabs = panelMaximized ? CODE_TABS.filter((tab) => tab === 'CODE' || tab === 'CHAT') : CODE_TABS
+  const visibleTabs = panelMaximized
+    ? CODE_TABS.filter((tab) => tab === 'CODE' || tab === 'CHAT' || tab === 'PREVIEW')
+    : CODE_TABS
   const moveToLeft = panelSide === 'right'
   const showPanelMove = codeTab === 'CODE' || codeTab === 'TERMINAL'
 
@@ -413,6 +420,8 @@ export default function RightPanel(): JSX.Element {
             </div>
           </>
         )}
+
+        {previewMounted && <BrowserPreview active={codeTab === 'PREVIEW'} />}
 
         {terminalMounted && (
           <PanelTerminal

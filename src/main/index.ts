@@ -450,7 +450,9 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Enables the in-app website preview (<webview> in the code panel).
+      webviewTag: true
     }
   })
 
@@ -621,7 +623,21 @@ function registerIpc(): void {
   })
   ipcMain.on('win:new', () => createWindow())
   ipcMain.on('win:close', (event) => BrowserWindow.fromWebContents(event.sender)?.close())
+
+  ipcMain.on('shell:open-external', (_e, url: string) => {
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) void shell.openExternal(url)
+  })
 }
+
+// Keep links that try to open a new window from inside the preview <webview>
+// in the user's real browser rather than spawning chromeless child windows.
+app.on('web-contents-created', (_event, contents) => {
+  if (contents.getType() !== 'webview') return
+  contents.setWindowOpenHandler((details) => {
+    if (/^https?:\/\//i.test(details.url)) void shell.openExternal(details.url)
+    return { action: 'deny' }
+  })
+})
 
 app.whenReady().then(() => {
   registerAppProtocol()

@@ -15,7 +15,7 @@ interface PaletteItem {
 }
 
 const GROUP_ORDER: ResultGroup[] = ['Sessions', 'Tabs', 'Settings', 'Actions']
-const PANEL_TABS: CodePanelTab[] = ['CODE', 'CHAT', 'OUTPUT', 'TERMINAL', 'PROBLEMS']
+const PANEL_TABS: CodePanelTab[] = ['CODE', 'CHAT', 'OUTPUT', 'PREVIEW', 'TERMINAL', 'PROBLEMS']
 
 export default function CommandPalette(): JSX.Element | null {
   const open = useStore((s) => s.paletteOpen)
@@ -33,6 +33,9 @@ export default function CommandPalette(): JSX.Element | null {
   const toggleTasks = useStore((s) => s.toggleTasks)
   const togglePanel = useStore((s) => s.togglePanel)
   const setCodePanelTab = useStore((s) => s.setCodePanelTab)
+  const openPreview = useStore((s) => s.openPreview)
+  const previewUrl = useStore((s) => s.previewUrl)
+  const homeUrl = useStore((s) => s.browserSettings.homeUrl)
 
   const [q, setQ] = useState('')
   const [active, setActiveIndex] = useState(0)
@@ -152,6 +155,14 @@ export default function CommandPalette(): JSX.Element | null {
         run: () => void openWorkspace('project')
       },
       {
+        key: 'browser-preview',
+        group: 'Actions',
+        label: 'New Browser Tab',
+        hint: 'preview',
+        keywords: 'browser website preview web localhost url open tab',
+        run: () => openPreview(previewUrl || homeUrl.trim() || 'https://www.google.com')
+      },
+      {
         key: 'tasks',
         group: 'Actions',
         label: 'Open Automations',
@@ -199,7 +210,10 @@ export default function CommandPalette(): JSX.Element | null {
     toggleProfileSetup,
     toggleTasks,
     togglePanel,
-    setCodePanelTab
+    setCodePanelTab,
+    openPreview,
+    previewUrl,
+    homeUrl
   ])
 
   const results = useMemo(() => {

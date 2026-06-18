@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import type {
   AgentSessionHistory,
   AttachmentSaveResult,
@@ -120,6 +120,25 @@ const api = {
     maximize: (): void => ipcRenderer.send('win:maximize'),
     newWindow: (): void => ipcRenderer.send('win:new'),
     close: (): void => ipcRenderer.send('win:close')
+  },
+
+  openExternal: (url: string): void => ipcRenderer.send('shell:open-external', url),
+
+  zoom: {
+    in: (): number => {
+      const next = Math.min(3, Math.round((webFrame.getZoomFactor() + 0.1) * 100) / 100)
+      webFrame.setZoomFactor(next)
+      return next
+    },
+    out: (): number => {
+      const next = Math.max(0.5, Math.round((webFrame.getZoomFactor() - 0.1) * 100) / 100)
+      webFrame.setZoomFactor(next)
+      return next
+    },
+    reset: (): number => {
+      webFrame.setZoomFactor(1)
+      return 1
+    }
   }
 }
 

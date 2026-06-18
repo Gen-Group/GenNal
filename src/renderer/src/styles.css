@@ -1637,19 +1637,34 @@ select {
   display: grid;
   place-items: end start;
   padding: 0 0 82px 292px;
-  background: #00000040;
+  background: #00000055;
+  backdrop-filter: blur(2px);
+  animation: confirm-fade 0.14s ease-out;
+}
+@keyframes confirm-fade {
+  from {
+    opacity: 0;
+  }
 }
 .confirm-card {
   position: relative;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 10px;
-  width: 268px;
-  padding: 12px;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 11px;
+  width: 280px;
+  padding: 14px;
   border: 1px solid #7c5cff4d;
-  border-radius: 10px;
+  border-radius: 12px;
   background: linear-gradient(180deg, var(--s4), var(--s3));
-  box-shadow: inset 0 1px 0 var(--ov1), 0 20px 42px -28px #000;
+  box-shadow: inset 0 1px 0 var(--ov1), 0 24px 50px -24px #000c, 0 2px 8px -4px #0008;
+  transform-origin: bottom left;
+  animation: confirm-pop 0.16s cubic-bezier(0.18, 0.9, 0.32, 1.2);
+}
+@keyframes confirm-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
 }
 .confirm-hide {
   position: absolute;
@@ -1671,11 +1686,12 @@ select {
 .confirm-icon {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
   background: #7c5cff24;
   color: var(--accent2);
+  box-shadow: inset 0 0 0 1px #7c5cff2e;
 }
 .confirm-copy {
   min-width: 0;
@@ -1722,6 +1738,18 @@ select {
 }
 .confirm-primary:hover {
   filter: brightness(1.08);
+}
+.confirm-danger {
+  border-color: #ff5f6e4d;
+}
+.confirm-danger .confirm-icon {
+  background: #ff5f6e22;
+  color: #ff8a95;
+  box-shadow: inset 0 0 0 1px #ff5f6e33;
+}
+.confirm-danger .confirm-primary {
+  background: linear-gradient(135deg, #ef4444, #f87171);
+  box-shadow: 0 8px 18px -12px #ef4444;
 }
 
 /* ---- profile dialog ---- */
@@ -2122,6 +2150,9 @@ select {
 }
 
 .grid-empty { flex: 1; display: grid; place-items: center; }
+/* Empty-state card shown over the (otherwise empty) pane grid when the active
+   project has no terminals, while other projects' panes stay mounted hidden. */
+.grid-empty-overlay { position: absolute; inset: 0; display: grid; place-items: center; z-index: 5; }
 .ge-card { text-align: center; max-width: 380px; }
 .ge-mark { width: 72px; height: 72px; margin: 0 auto 16px; border-radius: 18px; object-fit: cover;
   box-shadow: 0 0 34px -14px #27d9ffcc; }
@@ -2431,6 +2462,58 @@ select {
 .rp-term-host .xterm { height: 100%; }
 .rp-term-host .xterm-viewport { background: transparent !important; }
 .rp-term-host .xterm-screen { padding-left: 0; }
+
+/* In-app website preview (webview) */
+.rp-browser { position: relative; flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.rp-browser.hidden { display: none; }
+.rp-browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--s4);
+  background: var(--s1);
+}
+.rp-browser-nav {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--bd);
+  background: var(--s3);
+  color: var(--tx3);
+  border-radius: 6px;
+}
+.rp-browser-nav:hover:not(:disabled) { background: var(--ov2); color: var(--tx); }
+.rp-browser-nav:disabled { opacity: .4; cursor: default; }
+.rp-browser-address {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--s2);
+  color: var(--tx);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+.rp-browser-address:focus { outline: none; border-color: var(--accent); background: var(--s1); }
+.rp-browser-view { flex: 1; min-height: 0; background: #fff; }
+.rp-webview { display: flex; width: 100%; height: 100%; border: 0; }
+.rp-browser-status {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-size: 10.5px;
+  color: var(--tx4);
+  background: var(--s1);
+  border-top: 1px solid var(--s4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .rp-attachment {
   position: absolute;
   left: 50%;
@@ -2933,6 +3016,291 @@ select {
   background: linear-gradient(135deg, var(--accent), var(--accent2));
   color: #fff;
   box-shadow: 0 6px 16px -8px #7c5cffcc;
+}
+
+/* ---- keyboard shortcuts settings ---- */
+.shortcuts-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.shortcuts-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.shortcut-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  background: var(--s2);
+  color: var(--tx3);
+}
+.shortcut-search:focus-within {
+  border-color: var(--accent);
+}
+.shortcut-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--tx);
+  font-size: 12.5px;
+  outline: none;
+}
+.shortcut-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--tx3);
+}
+.shortcut-reset-all {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  background: var(--s2);
+  color: var(--tx2);
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.shortcut-reset-all:hover {
+  background: var(--ov2);
+  color: var(--tx);
+}
+.shortcut-status-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.shortcut-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--s2);
+  color: var(--tx2);
+  font-size: 12px;
+  font-weight: 700;
+}
+.shortcut-status-chip:hover {
+  background: var(--ov2);
+  color: var(--tx);
+}
+.shortcut-status-chip.active {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+}
+.shortcut-status-count {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: var(--ov2);
+  color: inherit;
+  font-size: 10.5px;
+  text-align: center;
+}
+.shortcut-status-chip.active .shortcut-status-count {
+  background: #ffffff2e;
+}
+.shortcut-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.shortcut-group {
+  display: flex;
+  flex-direction: column;
+}
+.shortcut-group-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tx3);
+  padding: 0 2px 6px;
+}
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  background: var(--s3);
+}
+.shortcut-row + .shortcut-row {
+  margin-top: 6px;
+}
+.shortcut-row.conflict {
+  border-color: #ff5f6e66;
+  background: #ff5f6e10;
+}
+.shortcut-row-info {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.shortcut-row-label {
+  color: var(--tx);
+  font-size: 13px;
+  font-weight: 650;
+}
+.shortcut-scope {
+  padding: 1px 8px;
+  border: 1px solid var(--bd);
+  border-radius: 999px;
+  background: var(--s2);
+  color: var(--tx3);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.shortcut-row-keys {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.shortcut-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+}
+.shortcut-keys:hover {
+  background: var(--ov2);
+}
+.shortcut-keys kbd {
+  min-width: 22px;
+  padding: 3px 7px;
+  border: 1px solid var(--bd);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: var(--s2);
+  color: var(--tx);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+.shortcut-keys.recording {
+  padding: 5px 10px;
+  border: 1px dashed var(--accent);
+  border-radius: 7px;
+  background: #7c5cff1a;
+  color: var(--accent2);
+  font-size: 11.5px;
+  font-weight: 700;
+  animation: shortcut-blink 1s ease-in-out infinite;
+}
+@keyframes shortcut-blink {
+  50% {
+    opacity: 0.6;
+  }
+}
+.shortcut-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px dashed var(--bd);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tx3);
+  font-size: 12px;
+  font-weight: 700;
+}
+.shortcut-add:hover {
+  border-color: var(--accent);
+  color: var(--accent2);
+}
+.shortcut-row-reset {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--tx3);
+}
+.shortcut-row-reset:hover {
+  background: var(--ov2);
+  color: var(--tx);
+}
+.shortcut-empty {
+  padding: 18px;
+  text-align: center;
+  color: var(--tx3);
+  font-size: 12.5px;
+}
+
+/* notifications settings */
+.settings-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-card-title svg {
+  width: 15px;
+  height: 15px;
+  color: var(--tx2);
+  flex-shrink: 0;
+}
+.settings-card.is-disabled {
+  opacity: 0.5;
+}
+.notification-sound-card {
+  grid-template-columns: minmax(0, 1fr);
+}
+.settings-select {
+  margin-top: 12px;
+  width: 100%;
+  max-width: 320px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  background: var(--s2);
+  color: var(--tx);
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.settings-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.settings-test-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.settings-test-row .settings-close {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-test-row .settings-close svg {
+  width: 15px;
+  height: 15px;
+}
+.settings-test-note {
+  color: var(--tx2);
+  font-size: 12px;
 }
 
 /* terminal settings: section headers + session manager */

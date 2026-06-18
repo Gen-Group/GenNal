@@ -8,6 +8,7 @@ import {
 } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useStore, scrollbackLines, windowsShellCommand } from '../store'
 
 // A single dedicated shell that lives in the right panel's TERMINAL tab.
@@ -49,6 +50,8 @@ export default function PanelTerminal({
   // a guard against the same paste running twice (keybinding + DOM event).
   const pasteRef = useRef<() => void>(() => {})
   const lastPasteRef = useRef(0)
+  // URL currently under the mouse, so a right-click can open it in the preview.
+  const hoveredUrlRef = useRef<string | null>(null)
   const terminalSettings = useStore((s) => s.terminalSettings)
   const settingsRef = useRef(terminalSettings)
   useEffect(() => {
@@ -79,6 +82,23 @@ export default function PanelTerminal({
     const fit = new FitAddon()
     fitRef.current = fit
     term.loadAddon(fit)
+
+    // Make URLs clickable: open in the in-app website preview, and track the
+    // hovered URL so a right-click can open it too.
+    const openUrl = (uri: string): void => {
+      if (/^https?:\/\//i.test(uri)) useStore.getState().openPreview(uri)
+    }
+    term.loadAddon(
+      new WebLinksAddon((_event, uri) => openUrl(uri), {
+        hover: (_event, uri) => {
+          hoveredUrlRef.current = uri
+        },
+        leave: () => {
+          hoveredUrlRef.current = null
+        }
+      })
+    )
+
     term.open(hostRef.current)
 
     // xterm has no built-in copy/paste: copy the selection on Ctrl/Cmd+C (when
@@ -276,6 +296,14 @@ export default function PanelTerminal({
   }
 
   const onContextMenu = (e: ReactMouseEvent<HTMLDivElement>): void => {
+    // Right-clicking a URL opens it in the in-app website preview.
+    const url = hoveredUrlRef.current
+    if (url && !e.ctrlKey) {
+      e.preventDefault()
+      window.api.suppressNextContextMenu()
+      if (/^https?:\/\//i.test(url)) useStore.getState().openPreview(url)
+      return
+    }
     // Ctrl+right-click falls through to the native Cut/Copy/Paste menu.
     if (!settingsRef.current.rightClickPaste || e.ctrlKey) return
     e.preventDefault()

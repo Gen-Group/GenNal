@@ -75,6 +75,23 @@ export default function App(): JSX.Element {
         e.preventDefault()
         window.api.win.newWindow()
       }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault()
+        const s = useStore.getState()
+        s.openPreview(s.previewUrl || s.browserSettings.homeUrl.trim() || 'https://www.google.com')
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault()
+        window.api.zoom.in()
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === '-' || e.key === '_')) {
+        e.preventDefault()
+        window.api.zoom.out()
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+        e.preventDefault()
+        window.api.zoom.reset()
+      }
       if (e.key === 'Escape') togglePalette(false)
     }
     window.addEventListener('keydown', onKey)

@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useStore, scrollbackLines, type Session } from '../store'
 
 function isTerminalReport(data: string): boolean {
@@ -72,7 +73,17 @@ function quotePath(path: string): string {
   return `"${path.replace(/"/g, '\\"')}"`
 }
 
-export default function ModelPane({ session }: { session: Session }): JSX.Element {
+export default function ModelPane({
+  session,
+  hidden = false,
+  number
+}: {
+  session: Session
+  /** Hidden in place (kept mounted so the pty stays alive) when not the active project's pane. */
+  hidden?: boolean
+  /** 1-based terminal number within the active project. Falls back to global order. */
+  number?: number
+}): JSX.Element {
   const paneRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
@@ -82,6 +93,9 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
   // both the key handler and a DOM paste event fire.
   const pasteRef = useRef<() => void>(() => {})
   const lastPasteRef = useRef(0)
+  // The URL the mouse is currently hovering in the terminal (if any), so a
+  // right-click can open it in the in-app website preview.
+  const hoveredUrlRef = useRef<string | null>(null)
   const [attachmentNotice, setAttachmentNotice] = useState<AttachmentNotice | null>(null)
   const setStatus = useStore((s) => s.setStatus)
   const removeSession = useStore((s) => s.removeSession)
@@ -90,6 +104,7 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
   const sessions = useStore((s) => s.sessions)
   const addSession = useStore((s) => s.addSession)
   const setGrid = useStore((s) => s.setGrid)
+  const openPreview = useStore((s) => s.openPreview)
   const terminalSettings = useStore((s) => s.terminalSettings)
   const terminalNumber = sessions.findIndex((s) => s.id === session.id) + 1
 
@@ -119,6 +134,24 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
 
     const fit = new FitAddon()
     term.loadAddon(fit)
+
+    // Detect URLs in the output: underline them on hover, open them in the
+    // in-app website preview on click, and remember the hovered one so a
+    // right-click (below) can open it too.
+    const openUrl = (uri: string): void => {
+      if (/^https?:\/\//i.test(uri)) useStore.getState().openPreview(uri)
+    }
+    term.loadAddon(
+      new WebLinksAddon((_event, uri) => openUrl(uri), {
+        hover: (_event, uri) => {
+          hoveredUrlRef.current = uri
+        },
+        leave: () => {
+          hoveredUrlRef.current = null
+        }
+      })
+    )
+
     term.open(termRef.current)
     fit.fit()
     term.focus()
@@ -360,6 +393,15 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
   }
 
   const onPaneContextMenu = (e: MouseEvent<HTMLDivElement>): void => {
+    // Right-clicking a URL opens it in the in-app website preview, regardless of
+    // the paste-on-right-click setting.
+    const url = hoveredUrlRef.current
+    if (url && !e.ctrlKey) {
+      e.preventDefault()
+      window.api.suppressNextContextMenu()
+      if (/^https?:\/\//i.test(url)) openPreview(url)
+      return
+    }
     // Ctrl+right-click falls through to the native Cut/Copy/Paste menu.
     if (!settingsRef.current.rightClickPaste || e.ctrlKey) return
     e.preventDefault()
@@ -375,7 +417,7 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
     <div
       ref={paneRef}
       className={`pane ${activeId === session.id ? 'focused' : ''}`}
-      style={{ '--pane-accent': session.accent } as CSSProperties}
+      style={{ '--pane-accent': session.accent, display: hidden ? 'none' : undefined } as CSSProperties}
       onMouseDown={focusPane}
       onClick={focusPane}
       onMouseEnter={onPaneMouseEnter}
@@ -388,7 +430,7 @@ export default function ModelPane({ session }: { session: Session }): JSX.Elemen
     >
       <div className="pane-head">
         <span className="pane-dot" style={{ background: session.accent, color: session.accent }} />
-        <span className="pane-name">Terminal {terminalNumber || 1}</span>
+        <span className="pane-name">Terminal {number ?? (terminalNumber || 1)}</span>
         <span className="pane-tag">{session.tag}</span>
         <span className="pane-actions">
           <button className="pane-act" title="New terminal" aria-label="New terminal" onClick={(e) => actionClick(e, () => addSession(session.modelId))}>

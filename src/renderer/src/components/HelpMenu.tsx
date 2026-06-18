@@ -42,6 +42,7 @@ const MOD = isMac ? '⌘' : 'Ctrl'
 const SHORTCUTS: { keys: string; label: string }[] = [
   { keys: `${MOD} K`, label: 'Open command palette' },
   { keys: `${MOD} N`, label: 'New window' },
+  { keys: `${MOD} ⇧ B`, label: 'Open website preview' },
   { keys: 'Esc', label: 'Close palette / dialogs' }
 ]
 

@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { useStore } from '../store'
+import { useStore, activeProjectPath } from '../store'
 import type { WorkspaceFile } from '../../../shared/types'
 
 interface FileTreeNode {
@@ -199,6 +199,10 @@ export default function Sidebar(): JSX.Element {
   const [filterMenu, setFilterMenu] = useState<{ x: number; y: number } | null>(null)
   const [workspaceFilter, setWorkspaceFilter] = useState<WorkspaceFilterId>('all')
   const [confirmNewWindowOpen, setConfirmNewWindowOpen] = useState(false)
+  const [confirmRemoveProject, setConfirmRemoveProject] = useState<{
+    path: string
+    name: string
+  } | null>(null)
   const [addProjectOpen, setAddProjectOpen] = useState(false)
   const [activeNav, setActiveNav] = useState<'tasks' | 'automations' | null>(null)
   const sessions = useStore((s) => s.sessions)
@@ -226,9 +230,12 @@ export default function Sidebar(): JSX.Element {
   const createWorkspaceFile = useStore((s) => s.createWorkspaceFile)
   const createWorkspaceFolder = useStore((s) => s.createWorkspaceFolder)
   const openImagePreview = useStore((s) => s.openImagePreview)
-  const running = sessions.filter((s) => s.status === 'running').length
   const workspaceName = workspace?.name ?? 'Open workspace'
-  const primarySessions = sessions.slice(0, 3)
+  // Only show terminals that belong to the active project (terminals are scoped
+  // per project, matching what the main grid displays).
+  const projectSessions = sessions.filter((s) => s.projectPath === activeProjectPath(workspace))
+  const running = projectSessions.filter((s) => s.status === 'running').length
+  const primarySessions = projectSessions.slice(0, 3)
   const aiModel = models.find((model) => model.id === 'codex') ?? models.find((model) => model.id !== 'custom')
   const cliModel = models.find((model) => model.id === 'custom') ?? models[0]
   const git = workspace?.git
@@ -504,7 +511,7 @@ export default function Sidebar(): JSX.Element {
                     aria-label={`Remove ${project.name} from the list`}
                     onClick={(event) => {
                       event.stopPropagation()
-                      removeRecentProject(project.path)
+                      setConfirmRemoveProject({ path: project.path, name: project.name })
                     }}
                   >
                     <svg viewBox="0 0 14 14" width="12" height="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
@@ -690,33 +697,6 @@ export default function Sidebar(): JSX.Element {
             <span className="workspace-open-arrow">›</span>
           </div>
         </div>
-        {sessions.length > 0 && (
-          <div className="ws-cards">
-            {sessions.map((session) => (
-              <button
-                key={session.id}
-                className={`ws-card ${activeId === session.id ? 'active' : ''}`}
-                title={session.label}
-                onClick={() => setActive(session.id)}
-              >
-                <span className="ws-card-head">
-                  <span
-                    className={`branch-status ${session.status === 'running' ? 'on' : session.status === 'error' ? 'err' : ''}`}
-                    style={{ color: session.accent }}
-                    aria-hidden="true"
-                  />
-                  <span className="ws-card-name">{session.label}</span>
-                  {activeId === session.id && <span className="branch-pill primary">primary</span>}
-                </span>
-                <span className="ws-card-sub">
-                  <span className="ws-card-glyph" aria-hidden="true" />
-                  <span className="ws-card-repo">{workspaceName}</span>
-                  <span className="ws-card-meta">{isRepo ? branchName : session.status}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
         {workspaceMenu && (
           <div
             className="workspace-add-menu"
@@ -1012,6 +992,61 @@ export default function Sidebar(): JSX.Element {
               </button>
               <button className="confirm-primary" onClick={confirmNewWindow}>
                 Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmRemoveProject && (
+        <div
+          className="confirm-popover-backdrop"
+          onMouseDown={() => setConfirmRemoveProject(null)}
+        >
+          <div
+            className="confirm-card confirm-danger"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="remove-project-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button
+              className="confirm-hide"
+              title="Cancel"
+              aria-label="Cancel removing project"
+              onClick={() => setConfirmRemoveProject(null)}
+            >
+              <svg viewBox="0 0 14 14" width="13" height="13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+                <path d="M3.5 3.5 L10.5 10.5 M10.5 3.5 L3.5 10.5" />
+              </svg>
+            </button>
+            <div className="confirm-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 4h10M6 4V2.5h4V4M5 4l.5 9h5l.5-9" />
+              </svg>
+            </div>
+            <div className="confirm-copy">
+              <h3 id="remove-project-title">Close this project?</h3>
+              <p>
+                Remove <strong>{confirmRemoveProject.name}</strong> from the projects list.
+                Your files won&apos;t be deleted.
+              </p>
+            </div>
+            <div className="confirm-actions">
+              <button
+                className="confirm-secondary"
+                onClick={() => setConfirmRemoveProject(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="confirm-primary"
+                onClick={() => {
+                  removeRecentProject(confirmRemoveProject.path)
+                  setConfirmRemoveProject(null)
+                }}
+              >
+                Close
               </button>
             </div>
           </div>
