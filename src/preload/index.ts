@@ -8,6 +8,8 @@ import type {
   CliUsage,
   GithubFetchPayload,
   GithubWorkResult,
+  MobileContext,
+  MobileStatus,
   ModelDef,
   PtyCreatePayload,
   PtyData,
@@ -123,6 +125,13 @@ const api = {
   },
 
   openExternal: (url: string): void => ipcRenderer.send('shell:open-external', url),
+
+  mobile: {
+    start: (): Promise<MobileStatus> => ipcRenderer.invoke('mobile:start'),
+    stop: (): Promise<MobileStatus> => ipcRenderer.invoke('mobile:stop'),
+    status: (): Promise<MobileStatus> => ipcRenderer.invoke('mobile:status'),
+    setContext: (ctx: MobileContext): void => ipcRenderer.send('mobile:context', ctx)
+  },
 
   zoom: {
     in: (): number => {

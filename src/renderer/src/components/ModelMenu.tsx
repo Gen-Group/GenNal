@@ -13,6 +13,7 @@ export default function ModelMenu({
   const addSession = useStore((s) => s.addSession)
   const removeModel = useStore((s) => s.removeModel)
   const toggleAddModel = useStore((s) => s.toggleAddModel)
+  const openUsage = useStore((s) => s.openUsage)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -44,6 +45,20 @@ export default function ModelMenu({
                 <span className="menu-dot" style={{ background: m.accent }} />
                 <span>{m.label}</span>
                 <span className="menu-tag">{m.tag}</span>
+              </button>
+              <button
+                className="menu-usage"
+                title={`View ${m.label} usage`}
+                aria-label={`View ${m.label} usage`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  openUsage(m.id)
+                  setOpen(false)
+                }}
+              >
+                <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M2 13h12M4 13V7M8 13V3M12 13v-4" />
+                </svg>
               </button>
               {m.custom && (
                 <button

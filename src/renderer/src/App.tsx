@@ -4,6 +4,7 @@ import TitleBar from './components/TitleBar'
 import Sidebar from './components/Sidebar'
 import LayoutToolbar from './components/LayoutToolbar'
 import PaneGrid from './components/PaneGrid'
+import BrowserPreview from './components/BrowserPreview'
 import TasksPanel from './components/TasksPanel'
 import AutomationsPanel from './components/AutomationsPanel'
 import SessionHistoryPanel from './components/SessionHistoryPanel'
@@ -13,6 +14,7 @@ import CommandPalette from './components/CommandPalette'
 import SettingsPanel from './components/SettingsPanel'
 import ProfileDialog from './components/ProfileDialog'
 import AddModelDialog from './components/AddModelDialog'
+import MobileDialog from './components/MobileDialog'
 import ImagePreview from './components/ImagePreview'
 
 export default function App(): JSX.Element {
@@ -31,6 +33,7 @@ export default function App(): JSX.Element {
   const tasksOpen = useStore((s) => s.tasksOpen)
   const automationsOpen = useStore((s) => s.automationsOpen)
   const historyOpen = useStore((s) => s.historyOpen)
+  const previewCenter = useStore((s) => s.previewCenter)
   const tickAutomations = useStore((s) => s.tickAutomations)
   const bodyClasses = [
     'body',
@@ -117,7 +120,7 @@ export default function App(): JSX.Element {
           ) : (
             <>
               <LayoutToolbar />
-              <PaneGrid />
+              {previewCenter ? <BrowserPreview active center /> : <PaneGrid />}
             </>
           )}
         </main>
@@ -128,6 +131,7 @@ export default function App(): JSX.Element {
       <SettingsPanel />
       <ProfileDialog />
       <AddModelDialog />
+      <MobileDialog />
       <ImagePreview />
     </div>
   )

@@ -292,10 +292,14 @@ interface AppState {
   stats: SystemStats
   paletteOpen: boolean
   settingsOpen: boolean
+  /** When set, the Settings panel should jump to the Stats & Usage detail for this model id. */
+  pendingUsageModelId: string | null
   addModelOpen: boolean
   tasksOpen: boolean
   automationsOpen: boolean
   historyOpen: boolean
+  /** GenNal Mobile pairing dialog (QR code) is open. */
+  mobileOpen: boolean
   githubToken: string
   automations: Automation[]
   automationRuns: AutomationRun[]
@@ -318,6 +322,8 @@ interface AppState {
   previewUrl: string | null
   /** Bumped to force the preview <webview> to reload the same URL. */
   previewNonce: number
+  /** When true the website preview fills the main center area instead of the grid. */
+  previewCenter: boolean
   chatHistory: ChatHistoryEntry[]
 
   setModels: (m: ModelDef[]) => void
@@ -339,9 +345,14 @@ interface AppState {
   setStats: (s: SystemStats) => void
   togglePalette: (v?: boolean) => void
   toggleSettings: (v?: boolean) => void
+  /** Open Settings on the Stats & Usage detail for a model (used by "View usage" menus). */
+  openUsage: (modelId: string) => void
+  /** Clear a consumed usage deep-link request. */
+  clearPendingUsage: () => void
   toggleTasks: (v?: boolean) => void
   toggleAutomations: (v?: boolean) => void
   toggleHistory: (v?: boolean) => void
+  toggleMobile: (v?: boolean) => void
   setGithubToken: (token: string) => void
   addAutomationFromTemplate: (template: AutomationTemplate) => string
   addBlankAutomation: () => string
@@ -380,6 +391,8 @@ interface AppState {
   clearRunOutput: () => void
   /** Load a URL in the preview tab, opening the code panel and switching to it. */
   openPreview: (url: string) => void
+  /** Move the website preview between the right code panel and the main screen. */
+  setPreviewCenter: (v?: boolean) => void
   applyCode: (code: string, suggestedName?: string) => Promise<ApplyCodeResult>
 }
 
@@ -988,8 +1001,10 @@ export const useStore = create<AppState>((set, get) => ({
   stats: { cpu: 0, memUsedMB: 0, memTotalMB: 0 },
   paletteOpen: false,
   settingsOpen: false,
+  pendingUsageModelId: null,
   addModelOpen: false,
   tasksOpen: false,
+  mobileOpen: false,
   automationsOpen: false,
   historyOpen: false,
   githubToken: loadGithubToken(),
@@ -1003,7 +1018,7 @@ export const useStore = create<AppState>((set, get) => ({
   privacySettings: loadPrivacySettings(),
   editorSettings: loadEditorSettings(),
   notificationSettings: loadNotificationSettings(),
-  profileSetupOpen: loadProfile().name === '',
+  profileSetupOpen: false,
   workspace: null,
   workspaceError: null,
   recentProjects: loadRecentProjects(),
@@ -1012,6 +1027,7 @@ export const useStore = create<AppState>((set, get) => ({
   running: false,
   previewUrl: null,
   previewNonce: 0,
+  previewCenter: false,
   chatHistory: loadChatHistory(),
 
   setModels: (models) => set({ models }),
@@ -1135,6 +1151,11 @@ export const useStore = create<AppState>((set, get) => ({
   setStats: (stats) => set({ stats }),
   togglePalette: (v) => set((s) => ({ paletteOpen: v ?? !s.paletteOpen })),
   toggleSettings: (v) => set((s) => ({ settingsOpen: v ?? !s.settingsOpen })),
+
+  openUsage: (modelId) => set({ settingsOpen: true, pendingUsageModelId: modelId }),
+
+  clearPendingUsage: () => set({ pendingUsageModelId: null }),
+  toggleMobile: (v) => set((s) => ({ mobileOpen: v ?? !s.mobileOpen })),
   toggleTasks: (v) =>
     set((s) => {
       const tasksOpen = v ?? !s.tasksOpen
@@ -1702,13 +1723,21 @@ export const useStore = create<AppState>((set, get) => ({
   clearRunOutput: () => set({ runOutput: [] }),
 
   openPreview: (url) => {
-    set((s) => ({
-      previewUrl: url,
-      previewNonce: s.previewNonce + 1,
-      codePanelTab: 'PREVIEW',
-      panelOpen: true
-    }))
+    set((s) =>
+      // When the preview is docked on the main screen, just point it at the new
+      // URL; otherwise open the right code panel and switch to its PREVIEW tab.
+      s.previewCenter
+        ? { previewUrl: url, previewNonce: s.previewNonce + 1 }
+        : {
+            previewUrl: url,
+            previewNonce: s.previewNonce + 1,
+            codePanelTab: 'PREVIEW',
+            panelOpen: true
+          }
+    )
   },
+
+  setPreviewCenter: (v) => set((s) => ({ previewCenter: v ?? !s.previewCenter })),
 
   // Apply a code block that the AI returned. With a file open in the editor we
   // overwrite it; inside a project with no file open we create `suggestedName`

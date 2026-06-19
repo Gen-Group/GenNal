@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useStore, type NotificationSound, type PanelSide, type ThemeName } from '../store'
+import type { MobileStatus } from '../../../shared/types'
 import UsageDetail from './UsageDetail'
 
 const THEME_OPTIONS: { id: ThemeName; label: string; hint: string }[] = [
@@ -583,13 +584,18 @@ export default function SettingsPanel(): JSX.Element | null {
   const addSession = useStore((s) => s.addSession)
   const removeModel = useStore((s) => s.removeModel)
   const toggleAddModel = useStore((s) => s.toggleAddModel)
+  const pendingUsageModelId = useStore((s) => s.pendingUsageModelId)
+  const clearPendingUsage = useStore((s) => s.clearPendingUsage)
   const stats = useStore((s) => s.stats)
   const profile = useStore((s) => s.profile)
   const toggleProfileSetup = useStore((s) => s.toggleProfileSetup)
   const workspace = useStore((s) => s.workspace)
   const openWorkspace = useStore((s) => s.openWorkspace)
   const clearWorkspace = useStore((s) => s.clearWorkspace)
+  const toggleMobile = useStore((s) => s.toggleMobile)
   const [active, setActive] = useState<SettingsKey>('appearance')
+  const [mobileStatus, setMobileStatus] = useState<MobileStatus | null>(null)
+  const [mobileCopied, setMobileCopied] = useState(false)
   const [taskSettings, setTaskSettings] = useState<TaskSourceSettings>(loadTaskSourceSettings)
   const [lastRefresh, setLastRefresh] = useState('Ready')
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false)
@@ -669,9 +675,43 @@ export default function SettingsPanel(): JSX.Element | null {
     }
   }, [priorityMenuOpen])
 
+  // Honor a "View usage" deep-link: jump to the Stats & Usage detail for the model.
+  useEffect(() => {
+    if (!pendingUsageModelId) return
+    setActive('usage')
+    setUsageDetailId(pendingUsageModelId)
+    clearPendingUsage()
+  }, [pendingUsageModelId, clearPendingUsage])
+
+  // Reflect the live bridge state while the Mobile section is showing. The QR
+  // pairing dialog owns the server's lifecycle; here we just poll its status so
+  // the panel shows whether a phone can currently connect.
+  useEffect(() => {
+    if (!open || active !== 'mobile') return
+    let cancelled = false
+    const refresh = (): void => {
+      void window.api.mobile.status().then((s) => {
+        if (!cancelled) setMobileStatus(s)
+      })
+    }
+    refresh()
+    const timer = window.setInterval(refresh, 2000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [open, active])
+
   if (!open) return null
 
   const choosePanelSide = (side: PanelSide): void => setPanelSide(side)
+  const mobileRunning = Boolean(mobileStatus?.running)
+  const copyMobileUrl = (): void => {
+    if (!mobileStatus?.url) return
+    window.api.writeClipboardText(mobileStatus.url)
+    setMobileCopied(true)
+    window.setTimeout(() => setMobileCopied(false), 1500)
+  }
   const activeGroup = GROUPS.find((group) => group.items.some((item) => item.id === active))
   const activeItem = activeGroup?.items.find((item) => item.id === active)
   const activeTaskSourceCount = taskSettings.sources.filter((source) => source.enabled).length
@@ -2120,6 +2160,67 @@ export default function SettingsPanel(): JSX.Element | null {
               </div>
 
               <p className="remote-note">Shortcuts are stored locally on this device.</p>
+            </div>
+          ) : active === 'mobile' ? (
+            <div className="settings-content remote-panel">
+              <div className="settings-summary-grid">
+                <div className="settings-summary">
+                  <span>Status</span>
+                  <strong>{mobileRunning ? 'Paired & online' : 'Off'}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Shared terminals</span>
+                  <strong>{sessions.length}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Project</span>
+                  <strong>{workspace?.kind === 'project' ? workspace.name : 'None'}</strong>
+                </div>
+              </div>
+
+              <div className="settings-card remote-add-card">
+                <div>
+                  <h3>GenNal Mobile</h3>
+                  <p>
+                    Pair a phone over your local Wi-Fi to chat with your models and drive open terminals
+                    from anywhere in the room. Pairing opens a QR code; the server runs only while that
+                    window is open.
+                  </p>
+                </div>
+                <div className="remote-form-row">
+                  <button className="remote-add-btn" type="button" onClick={() => toggleMobile(true)}>
+                    {mobileRunning ? 'Show pairing code' : 'Pair a device'}
+                  </button>
+                </div>
+              </div>
+
+              {mobileRunning ? (
+                <div className="remote-card connected">
+                  <span className="remote-status" />
+                  <div className="remote-copy">
+                    <div className="remote-card-head">
+                      <h3>This computer</h3>
+                      <span>Online</span>
+                    </div>
+                    <p>{mobileStatus?.displayUrl ?? mobileStatus?.host ?? 'Reachable on your network'}</p>
+                  </div>
+                  <div className="remote-card-actions">
+                    <button className="remote-connect on" onClick={copyMobileUrl} disabled={!mobileStatus?.url}>
+                      {mobileCopied ? 'Copied' : 'Copy link'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="settings-placeholder remote-empty">
+                  <h3>No device paired</h3>
+                  <p>Choose “Pair a device” to show a QR code your phone can scan.</p>
+                </div>
+              )}
+
+              <p className="remote-note">
+                The link carries a one-time pairing token, and the connection runs commands on this
+                computer — only pair devices you trust. Pairing stops the moment you close the QR window.
+              </p>
             </div>
           ) : (
             <div className="settings-placeholder">

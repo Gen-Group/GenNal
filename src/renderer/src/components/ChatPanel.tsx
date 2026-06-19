@@ -496,16 +496,31 @@ export default function ChatPanel({ active = true }: { active?: boolean }): JSX.
 
   const onPaste = (e: ReactClipboardEvent<HTMLDivElement>): void => {
     const files = Array.from(e.clipboardData.files) as DroppedFile[]
-    if (files.some((f) => isImageType(f.type))) {
+    const imageFiles = files.filter((f) => isImageType(f.type) || (f.path && isImagePath(f.path)))
+    // An image file copied from the file system (e.g. in Explorer) carries a real
+    // on-disk path the model can read, so attach it directly.
+    if (imageFiles.length > 0 && imageFiles.every((f) => f.path)) {
       e.preventDefault()
-      void attachFiles(files)
+      void attachFiles(imageFiles)
       return
     }
-    // A Windows screenshot (PrintScreen / Snipping Tool) is a raw bitmap the paste
-    // event doesn't expose as a file — pull it from the OS clipboard via main.
-    void window.api.saveClipboardImage().then((att) => {
-      if (att) addAttachments([att])
-    })
+    // Otherwise the clipboard holds a path-less bitmap — a screenshot
+    // (PrintScreen / Snipping Tool) or an image copied from another app. The paste
+    // event can't give us a readable file, so persist it via main, which reads the
+    // OS clipboard and writes a real PNG. Detect it from the `image/*` item even
+    // when `files` is empty; bail on plain-text pastes so the textarea handles them.
+    const hasClipboardImage =
+      imageFiles.length > 0 ||
+      Array.from(e.clipboardData.items).some((it) => it.type.startsWith('image/'))
+    if (!hasClipboardImage) return
+    e.preventDefault()
+    void window.api
+      .saveClipboardImage()
+      .then((att) => {
+        if (att) addAttachments([att])
+        else setNotice('Could not read the pasted image from the clipboard.')
+      })
+      .catch((err) => setNotice((err as Error).message || 'Could not read the pasted image.'))
   }
 
   const onDrop = (e: ReactDragEvent<HTMLDivElement>): void => {

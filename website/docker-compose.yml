@@ -1,0 +1,13 @@
+# Dokploy Compose service for the GenNal download site.
+# In Dokploy: Create Service -> Compose, set the Compose path to "website",
+# then add a Domain pointing at this service on port 80.
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Dokploy's Traefik routes to the container via this internal port.
+    # Add the public domain in the Dokploy "Domains" tab (container port 80).
+    expose:
+      - "80"

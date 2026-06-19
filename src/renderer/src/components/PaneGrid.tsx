@@ -23,6 +23,11 @@ export default function PaneGrid(): JSX.Element {
   const activeId = useStore((s) => s.activeId)
   const [colSizes, setColSizes] = useState<number[]>([])
   const [rowSizes, setRowSizes] = useState<number[]>([])
+  // Fraction (0.25–1) of the grid a lone terminal occupies on each axis, so a
+  // single pane can be shrunk/grown even though there's no neighbour to push
+  // against (multi-pane resizing redistributes fr units between tracks instead).
+  const [soloW, setSoloW] = useState(1)
+  const [soloH, setSoloH] = useState(1)
 
   // Terminals belong to the project they were opened in. We always render every
   // session so its live shell is never unmounted (which would kill the pty), and
@@ -41,10 +46,23 @@ export default function PaneGrid(): JSX.Element {
   const columns = colSizes.length === grid.cols ? colSizes : Array(grid.cols).fill(1)
   const gridRows = rowSizes.length === grid.rows ? rowSizes : Array(grid.rows).fill(1)
 
+  // Exactly one tiled terminal: it gets edge handles instead of the between-pane
+  // resizers, which need a neighbouring track to trade space with.
+  const solo = tiled && mine.length === 1
+
   useEffect(() => {
     setColSizes(Array(grid.cols).fill(1))
     setRowSizes(Array(grid.rows).fill(1))
   }, [grid.cols, grid.rows])
+
+  // Reset the lone-pane size whenever we leave the solo case, so reopening a
+  // single terminal starts full-size rather than at the last drag.
+  useEffect(() => {
+    if (!solo) {
+      setSoloW(1)
+      setSoloH(1)
+    }
+  }, [solo])
 
   const startResize = (axis: 'col' | 'row', index: number, event: ReactPointerEvent): void => {
     event.preventDefault()
@@ -83,6 +101,36 @@ export default function PaneGrid(): JSX.Element {
     window.addEventListener('pointerup', onUp)
   }
 
+  const startSoloResize = (axis: 'col' | 'row', event: ReactPointerEvent): void => {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const rect = gridRef.current?.getBoundingClientRect()
+    if (!rect) return
+
+    const start = axis === 'col' ? event.clientX : event.clientY
+    const size = axis === 'col' ? rect.width : rect.height
+    const initial = axis === 'col' ? soloW : soloH
+
+    const onMove = (moveEvent: PointerEvent): void => {
+      const current = axis === 'col' ? moveEvent.clientX : moveEvent.clientY
+      const delta = (current - start) / Math.max(size, 1)
+      const next = Math.max(0.25, Math.min(1, initial + delta))
+      if (axis === 'col') setSoloW(next)
+      else setSoloH(next)
+    }
+
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      document.body.classList.remove('resizing-grid')
+    }
+
+    document.body.classList.add('resizing-grid')
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
   const percentPositions = (sizes: number[]): number[] => {
     const total = sizes.reduce((sum, value) => sum + value, 0)
     let current = 0
@@ -99,12 +147,23 @@ export default function PaneGrid(): JSX.Element {
       ref={gridRef}
       className={`pane-grid mode-${mode}`}
       style={
-        tiled
+        solo
           ? {
-              gridTemplateColumns: columns.map((value) => `minmax(0, ${value}fr)`).join(' '),
-              gridTemplateRows: gridRows.map((value) => `minmax(0, ${value}fr)`).join(' ')
+              gridTemplateColumns:
+                soloW >= 0.999
+                  ? 'minmax(0, 1fr)'
+                  : `minmax(0, ${soloW}fr) minmax(0, ${1 - soloW}fr)`,
+              gridTemplateRows:
+                soloH >= 0.999
+                  ? 'minmax(0, 1fr)'
+                  : `minmax(0, ${soloH}fr) minmax(0, ${1 - soloH}fr)`
             }
-          : undefined
+          : tiled
+            ? {
+                gridTemplateColumns: columns.map((value) => `minmax(0, ${value}fr)`).join(' '),
+                gridTemplateRows: gridRows.map((value) => `minmax(0, ${value}fr)`).join(' ')
+              }
+            : undefined
       }
     >
       {sessions.map((s) => {
@@ -145,6 +204,23 @@ export default function PaneGrid(): JSX.Element {
             onPointerDown={(event) => startResize('row', index, event)}
           />
         ))}
+
+      {solo && (
+        <>
+          <button
+            className="grid-resizer col-resizer solo-resizer"
+            style={{ left: `${soloW * 100}%` }}
+            aria-label="Resize terminal width"
+            onPointerDown={(event) => startSoloResize('col', event)}
+          />
+          <button
+            className="grid-resizer row-resizer solo-resizer"
+            style={{ top: `${soloH * 100}%` }}
+            aria-label="Resize terminal height"
+            onPointerDown={(event) => startSoloResize('row', event)}
+          />
+        </>
+      )}
     </div>
   )
 }

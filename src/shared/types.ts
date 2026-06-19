@@ -198,6 +198,36 @@ export interface ChatExit {
   error?: string
 }
 
+/** One terminal pane exposed to a paired mobile device. */
+export interface MobilePane {
+  id: string
+  label: string
+  tag?: string
+}
+
+/** Live desktop context the mobile bridge serves to paired phones. */
+export interface MobileContext {
+  /** Working directory chat/terminal commands run in (the open project). */
+  cwd?: string
+  /** Terminal panes currently open on the desktop. */
+  panes: MobilePane[]
+}
+
+/** State of the mobile bridge server, returned to the renderer. */
+export interface MobileStatus {
+  running: boolean
+  /** Full URL encoded in the QR code, including the pairing token. */
+  url?: string
+  /** Same URL without the token, for display. */
+  displayUrl?: string
+  host?: string
+  port?: number
+  /** Random pairing token; only devices that scanned the QR can connect. */
+  token?: string
+  /** Set when the server could not start (e.g. no LAN address, port busy). */
+  error?: string
+}
+
 export type GithubWorkKind = 'issue' | 'pr'
 
 export interface GithubAssignee {

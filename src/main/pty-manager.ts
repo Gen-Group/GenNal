@@ -1,11 +1,49 @@
 import * as pty from 'node-pty'
 import { homedir } from 'os'
-import { existsSync } from 'fs'
+import { existsSync, statSync, chmodSync } from 'fs'
+import { dirname, join } from 'path'
 import type { BrowserWindow } from 'electron'
 import type { PtyCreatePayload } from '../shared/types'
 
 const isWindows = process.platform === 'win32'
 const isMac = process.platform === 'darwin'
+
+// node-pty on macOS/Linux shells out to a tiny `spawn-helper` binary to acquire
+// the controlling tty. When the app is packaged (asar-unpacked) the executable
+// bit on that helper can be lost, so pty.spawn fails with EACCES and every
+// terminal pane comes up blank/dead. Re-assert +x once before the first spawn.
+let helperChecked = false
+function ensureSpawnHelperExecutable(): void {
+  if (isWindows || helperChecked) return
+  helperChecked = true
+  try {
+    // require.resolve works at runtime in the CJS-bundled main and follows
+    // Electron's asar-unpacked redirection to the real on-disk module.
+    const ptyRoot = dirname(dirname(require.resolve('node-pty')))
+    const helper = join(ptyRoot, 'build', 'Release', 'spawn-helper')
+    if (existsSync(helper)) chmodSync(helper, 0o755)
+  } catch {
+    /* best effort — surfaced as a normal spawn error below if it still fails */
+  }
+}
+
+// Pick a working directory that actually exists. A persisted cwd can be stale
+// (deleted folder) or invalid for this OS (a Windows-style path on macOS); a
+// non-existent cwd makes pty.spawn throw, which is a common "dead terminal".
+function resolveCwd(cwd?: string): string {
+  try {
+    if (cwd && statSync(cwd).isDirectory()) return cwd
+  } catch {
+    /* fall through to a safe default */
+  }
+  try {
+    const fallback = process.cwd()
+    if (statSync(fallback).isDirectory()) return fallback
+  } catch {
+    /* fall through */
+  }
+  return homedir()
+}
 
 const SHELL = isWindows
   ? 'powershell.exe'
@@ -48,12 +86,40 @@ interface Session {
 
 const sessions = new Map<string, Session>()
 
+// Extra subscribers (beyond the owning BrowserWindow) that want a copy of every
+// pane's output/exit — currently the mobile bridge, which mirrors terminals to a
+// paired phone. Kept separate from the window send so desktop behaviour is
+// unchanged whether or not anything is listening.
+type PtyDataListener = (id: string, data: string) => void
+type PtyExitListener = (id: string, code: number) => void
+const dataListeners = new Set<PtyDataListener>()
+const exitListeners = new Set<PtyExitListener>()
+
+export function addPtyListeners(onData: PtyDataListener, onExit: PtyExitListener): () => void {
+  dataListeners.add(onData)
+  exitListeners.add(onExit)
+  return () => {
+    dataListeners.delete(onData)
+    exitListeners.delete(onExit)
+  }
+}
+
+/** Ids of the live terminal sessions, so the bridge knows which panes exist. */
+export function listSessionIds(): string[] {
+  return [...sessions.keys()]
+}
+
+export function hasSession(id: string): boolean {
+  return sessions.has(id)
+}
+
 export function createSession(win: BrowserWindow, payload: PtyCreatePayload): void {
   const { id, cwd, command, shell } = payload
   if (sessions.has(id)) return
 
   const env = { ...(process.env as Record<string, string>) }
   const { file: shellFile, args: shellArgs } = resolveShell(shell)
+  ensureSpawnHelperExecutable()
 
   let proc: pty.IPty
   try {
@@ -61,12 +127,21 @@ export function createSession(win: BrowserWindow, payload: PtyCreatePayload): vo
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
-      cwd: cwd || process.cwd() || homedir(),
+      cwd: resolveCwd(cwd),
       env,
       useConptyDll: isWindows
     })
   } catch (err) {
-    win.webContents.send('pty:exit', { id, code: -1 })
+    // Make the failure visible instead of leaving a blank pane: write the reason
+    // into the terminal, then report the exit so the status flips to 'stopped'.
+    if (!win.isDestroyed()) {
+      const reason = err instanceof Error ? err.message : String(err)
+      win.webContents.send('pty:data', {
+        id,
+        data: `\r\n\x1b[31mFailed to start shell (${shellFile}): ${reason}\x1b[0m\r\n`
+      })
+      win.webContents.send('pty:exit', { id, code: -1 })
+    }
     return
   }
 
@@ -74,6 +149,7 @@ export function createSession(win: BrowserWindow, payload: PtyCreatePayload): vo
 
   proc.onData((data) => {
     if (!win.isDestroyed()) win.webContents.send('pty:data', { id, data })
+    for (const listener of dataListeners) listener(id, data)
   })
 
   proc.onExit(({ exitCode }) => {
@@ -84,6 +160,7 @@ export function createSession(win: BrowserWindow, payload: PtyCreatePayload): vo
     // a spurious 'stopped' for a session that is actually alive.
     if (sessions.get(id)?.proc !== proc) return
     if (!win.isDestroyed()) win.webContents.send('pty:exit', { id, code: exitCode })
+    for (const listener of exitListeners) listener(id, exitCode)
     sessions.delete(id)
   })
 

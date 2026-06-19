@@ -12,6 +12,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { useStore, scrollbackLines, type Session } from '../store'
+import { createUrlScanner } from '../url-scanner'
 
 function isTerminalReport(data: string): boolean {
   return /^\x1b\[\?1;2c$/.test(data) || /^\x1b\[\?6c$/.test(data) || /^\x1b\[\d+;\d+R$/.test(data)
@@ -194,8 +195,15 @@ export default function ModelPane({
     window.api.ptyCreate({ id, command, cwd })
     setStatus(id, 'running')
 
+    // Auto-open any URL the model prints (e.g. a Google search it ran) in the
+    // in-app preview, so the data shows up without the user clicking the link.
+    const urlScanner = createUrlScanner((url) => useStore.getState().openPreview(url))
+
     const offData = window.api.onPtyData((d) => {
-      if (d.id === id) term.write(d.data)
+      if (d.id === id) {
+        term.write(d.data)
+        urlScanner.push(d.data)
+      }
     })
     const offExit = window.api.onPtyExit((d) => {
       if (d.id === id) setStatus(id, 'stopped')

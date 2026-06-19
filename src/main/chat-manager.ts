@@ -1,7 +1,12 @@
 import { spawn, type ChildProcess } from 'child_process'
 import { homedir } from 'os'
-import type { BrowserWindow } from 'electron'
-import type { ChatSendPayload } from '../shared/types'
+import type { ChatData, ChatExit, ChatSendPayload } from '../shared/types'
+
+// Where a chat's streamed output goes. The desktop passes a sink that forwards
+// to its BrowserWindow; the mobile bridge passes one that forwards to the paired
+// phone's SSE connection. Keeping chat-manager sink-agnostic lets both reuse the
+// exact same headless-run machinery.
+export type ChatSink = (channel: 'chat:data' | 'chat:exit', payload: ChatData | ChatExit) => void
 
 const isWindows = process.platform === 'win32'
 const isMac = process.platform === 'darwin'
@@ -82,10 +87,6 @@ interface ChatJob {
 
 const jobs = new Map<string, ChatJob>()
 
-function emit(win: BrowserWindow, channel: string, payload: unknown): void {
-  if (!win.isDestroyed()) win.webContents.send(channel, payload)
-}
-
 function baseCommand(command: string): string {
   return command.trim().split(/\s+/)[0] ?? ''
 }
@@ -115,10 +116,38 @@ function tokenize(command: string): string[] {
   return tokens
 }
 
-// Turn a single codex `--json` event into either a chunk of the final answer
-// (`answer`) or a short human-readable status line (`status`) to show while it
-// works. Unknown/irrelevant events return neither.
-function describeCodexEvent(evt: Record<string, unknown>): { answer?: string; status?: string } {
+// Collapse whitespace and clip a long codex message to one readable line.
+function oneLine(msg: string, max = 140): string {
+  const line = msg.replace(/\s+/g, ' ').trim()
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line
+}
+
+// Codex wraps the real cause (auth, quota, network) inside a verbose HTTP/JSON
+// blob. Translate the common ones into a short, actionable message so a failed
+// chat explains itself instead of looking like it silently gave up.
+function friendlyCodexError(raw: string): string {
+  const msg = (raw || '').trim()
+  if (!msg) return 'Codex finished without returning a reply.'
+  if (/\b402\b|payment required|deactivated_workspace/i.test(msg))
+    return 'Codex rejected the request (HTTP 402): your ChatGPT/Codex workspace is deactivated or out of quota. Check your plan or re-authenticate with `codex login`.'
+  if (/\b401\b|unauthor|not logged in/i.test(msg))
+    return 'Codex is not authorized. Run `codex login` to sign in, then try again.'
+  if (/\b429\b|rate limit|quota/i.test(msg))
+    return 'Codex is rate-limited or out of quota right now. Wait a moment and try again.'
+  if (/timed? ?out|dns|network|websocket|ENOTFOUND|ECONN|failed to connect/i.test(msg))
+    return `Codex couldn't reach the server (network error). Check your connection.\n\n${oneLine(msg, 200)}`
+  return oneLine(msg, 300)
+}
+
+// Turn a single codex `--json` event into a chunk of the final answer
+// (`answer`), a short human-readable status line (`status`) to show while it
+// works, and/or an `error` describing why a turn went wrong. Unknown events
+// return an empty object.
+function describeCodexEvent(evt: Record<string, unknown>): {
+  answer?: string
+  status?: string
+  error?: string
+} {
   const type = typeof evt.type === 'string' ? evt.type : ''
   const item = (evt.item ?? {}) as Record<string, unknown>
   const itemType = typeof item.type === 'string' ? item.type : ''
@@ -126,9 +155,27 @@ function describeCodexEvent(evt: Record<string, unknown>): { answer?: string; st
   if (type === 'thread.started') return { status: 'Starting…' }
   if (type === 'turn.started') return { status: 'Thinking…' }
 
+  // The turn failed outright — this carries the definitive reason no answer came.
+  if (type === 'turn.failed') {
+    const err = (evt.error ?? {}) as Record<string, unknown>
+    const message = typeof err.message === 'string' ? err.message : ''
+    return { error: message || 'Codex failed to complete the turn.' }
+  }
+
+  // A streamed error. Transient ones ("Reconnecting… 2/5") double as live status
+  // so the chat doesn't look frozen; all are remembered in case the turn fails.
+  if (type === 'error') {
+    const message = typeof evt.message === 'string' ? evt.message : ''
+    if (!message) return {}
+    return /reconnect/i.test(message)
+      ? { status: oneLine(message, 90), error: message }
+      : { error: message }
+  }
+
   if (type.startsWith('item.')) {
     const text = typeof item.text === 'string' ? item.text : ''
     const command = typeof item.command === 'string' ? item.command : ''
+    const message = typeof item.message === 'string' ? item.message : ''
     switch (itemType) {
       case 'agent_message':
         // The model's reply. Only emit on completion so we don't double-print.
@@ -141,6 +188,8 @@ function describeCodexEvent(evt: Record<string, unknown>): { answer?: string; st
         return { status: 'Editing files…' }
       case 'mcp_tool_call':
         return { status: 'Using a tool…' }
+      case 'error':
+        return message ? { error: message } : {}
       default:
         return {}
     }
@@ -154,9 +203,10 @@ function describeCodexEvent(evt: Record<string, unknown>): { answer?: string; st
 function createCodexParser(
   onAnswer: (text: string) => void,
   onStatus: (line: string) => void
-): { push: (chunk: string) => void; gotAnswer: () => boolean } {
+): { push: (chunk: string) => void; gotAnswer: () => boolean; lastError: () => string } {
   let buf = ''
   let answered = false
+  let lastError = ''
   const handle = (line: string): void => {
     const trimmed = line.trim()
     if (!trimmed) return
@@ -166,12 +216,13 @@ function createCodexParser(
     } catch {
       return // not a JSON event (stray output) — ignore
     }
-    const { answer, status } = describeCodexEvent(evt)
+    const { answer, status, error } = describeCodexEvent(evt)
     if (answer) {
       answered = true
       onAnswer(answer)
     }
     if (status) onStatus(status)
+    if (error) lastError = error
   }
   return {
     push: (chunk: string): void => {
@@ -182,7 +233,8 @@ function createCodexParser(
         buf = buf.slice(nl + 1)
       }
     },
-    gotAnswer: (): boolean => answered
+    gotAnswer: (): boolean => answered,
+    lastError: (): string => lastError
   }
 }
 
@@ -213,14 +265,14 @@ function buildInvocation(body: string): { shell: string; args: string[] } {
   return { shell: userShell, args: ['-l', '-c', body] }
 }
 
-export function startChat(win: BrowserWindow, payload: ChatSendPayload): void {
+export function startChat(sink: ChatSink, payload: ChatSendPayload): void {
   const { id, command } = payload
   cancelChat(id)
 
   const cli = baseCommand(command)
 
   if (!cli) {
-    emit(win, 'chat:exit', { id, code: null, error: 'This model has no command to run.' })
+    sink('chat:exit', { id, code: null, error: 'This model has no command to run.' })
     return
   }
 
@@ -258,7 +310,7 @@ export function startChat(win: BrowserWindow, payload: ChatSendPayload): void {
   const shellTest = placeheld ? substitutePrompt(command, ' ') : command
   if (!headlessArgs && /[|&;<>(){}$`]/.test(shellTest)) {
     const { shell, args } = buildInvocation(shellBody)
-    spawnChat(win, decorated, { file: shell, args, shellBody, triedShell: true, codexJson })
+    spawnChat(sink, decorated, { file: shell, args, shellBody, triedShell: true, codexJson })
     return
   }
 
@@ -272,7 +324,7 @@ export function startChat(win: BrowserWindow, payload: ChatSendPayload): void {
     : placeheld
       ? [...customArgs.map((t) => substitutePrompt(t, prompt)), ...imgFlags]
       : [...customArgs, ...imgFlags, prompt]
-  spawnChat(win, decorated, { file: cli, args: directArgs, shellBody, triedShell: false, codexJson })
+  spawnChat(sink, decorated, { file: cli, args: directArgs, shellBody, triedShell: false, codexJson })
 }
 
 interface SpawnAttempt {
@@ -283,7 +335,7 @@ interface SpawnAttempt {
   codexJson: boolean
 }
 
-function spawnChat(win: BrowserWindow, payload: ChatSendPayload, attempt: SpawnAttempt): void {
+function spawnChat(sink: ChatSink, payload: ChatSendPayload, attempt: SpawnAttempt): void {
   const { id, prompt, cwd } = payload
   const cli = baseCommand(payload.command)
 
@@ -291,7 +343,7 @@ function spawnChat(win: BrowserWindow, payload: ChatSendPayload, attempt: SpawnA
   // platform shell, which resolves PATH the same way the interactive terminals do.
   const fallbackToShell = (): void => {
     const { shell, args } = buildInvocation(attempt.shellBody)
-    spawnChat(win, payload, {
+    spawnChat(sink, payload, {
       file: shell,
       args,
       shellBody: attempt.shellBody,
@@ -317,7 +369,7 @@ function spawnChat(win: BrowserWindow, payload: ChatSendPayload, attempt: SpawnA
       fallbackToShell()
       return
     }
-    emit(win, 'chat:exit', { id, code: null, error: (err as Error).message })
+    sink('chat:exit', { id, code: null, error: (err as Error).message })
     return
   }
 
@@ -345,9 +397,9 @@ function spawnChat(win: BrowserWindow, payload: ChatSendPayload, attempt: SpawnA
     ? createCodexParser(
         (text) => {
           sawStdout = true
-          emit(win, 'chat:data', { id, stream: 'stdout', chunk: text })
+          sink('chat:data', { id, stream: 'stdout', chunk: text })
         },
-        (line) => emit(win, 'chat:data', { id, stream: 'stderr', chunk: `${line}\n` })
+        (line) => sink('chat:data', { id, stream: 'stderr', chunk: `${line}\n` })
       )
     : null
 
@@ -366,12 +418,12 @@ function spawnChat(win: BrowserWindow, payload: ChatSendPayload, attempt: SpawnA
     jobs.delete(id)
     // If the model has been streaming an answer, let it stand instead of erroring.
     if (sawStdout) {
-      emit(win, 'chat:exit', { id, code: null })
+      sink('chat:exit', { id, code: null })
       return
     }
     const lastLines = stderrTail.split('\n').filter((l) => l.trim()).slice(-2).join('\n')
     const detail = lastLines ? `\n\nLast activity:\n${lastLines}` : ''
-    emit(win, 'chat:exit', {
+    sink('chat:exit', {
       id,
       code: null,
       error:
@@ -394,7 +446,7 @@ function spawnChat(win: BrowserWindow, payload: ChatSendPayload, attempt: SpawnA
       return
     }
     sawStdout = true
-    emit(win, 'chat:data', { id, stream: 'stdout', chunk })
+    sink('chat:data', { id, stream: 'stdout', chunk })
   })
   proc.stderr?.on('data', (d: Buffer) => {
     armIdleTimer()
@@ -403,7 +455,7 @@ function spawnChat(win: BrowserWindow, payload: ChatSendPayload, attempt: SpawnA
     // For codex, progress comes from the parsed JSON events instead of the raw
     // stderr banner, so don't forward it to the chat bubble.
     if (codexParser) return
-    emit(win, 'chat:data', { id, stream: 'stderr', chunk })
+    sink('chat:data', { id, stream: 'stderr', chunk })
   })
   proc.on('error', (err: NodeJS.ErrnoException) => {
     if (jobs.get(id)?.proc !== proc) return
@@ -416,19 +468,29 @@ function spawnChat(win: BrowserWindow, payload: ChatSendPayload, attempt: SpawnA
       return
     }
     const hint = err.code === 'ENOENT' ? ` — is '${cli}' installed and on PATH?` : ''
-    emit(win, 'chat:exit', { id, code: null, error: `${err.message}${hint}` })
+    sink('chat:exit', { id, code: null, error: `${err.message}${hint}` })
     jobs.delete(id)
   })
   proc.on('close', (code) => {
     if (jobs.get(id)?.proc !== proc) return
     clearTimer()
-    // codex finished successfully but emitted no agent_message (e.g. it only ran
-    // commands) — surface a gentle note rather than letting the renderer treat a
-    // leftover status line as the answer/an error.
-    if (codexParser && code === 0 && !codexParser.gotAnswer()) {
-      emit(win, 'chat:data', { id, stream: 'stdout', chunk: 'Done (no message returned).' })
+    if (codexParser && !codexParser.gotAnswer()) {
+      // codex produced no answer. If it reported an error (auth/quota/network/a
+      // failed turn), surface it as the failure reason instead of a silent exit —
+      // otherwise the chat just looks like it gave up after "Thinking…".
+      const codexError = codexParser.lastError()
+      if (codexError) {
+        sink('chat:exit', { id, code, error: friendlyCodexError(codexError) })
+        jobs.delete(id)
+        return
+      }
+      // Exited cleanly with nothing to say (e.g. it only ran commands) — a gentle
+      // note rather than letting a leftover status line read as the answer.
+      if (code === 0) {
+        sink('chat:data', { id, stream: 'stdout', chunk: 'Done (no message returned).' })
+      }
     }
-    emit(win, 'chat:exit', { id, code })
+    sink('chat:exit', { id, code })
     jobs.delete(id)
   })
 }

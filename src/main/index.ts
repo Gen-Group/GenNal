@@ -15,10 +15,17 @@ import { startStats, stopStats } from './stats-service'
 import { startRun, stopRun } from './run-manager'
 import { startChat, cancelChat, cancelAllChats } from './chat-manager'
 import { fetchGithubWork } from './github-service'
+import {
+  startMobileBridge,
+  stopMobileBridge,
+  mobileStatus,
+  setMobileContext
+} from './mobile-bridge'
 import type {
   AttachmentSaveResult,
   ChatSendPayload,
   GithubFetchPayload,
+  MobileContext,
   ModelDef,
   PtyCreatePayload,
   RunStartPayload,
@@ -611,9 +618,24 @@ function registerIpc(): void {
 
   ipcMain.on('chat:send', (event, payload: ChatSendPayload) => {
     const window = BrowserWindow.fromWebContents(event.sender)
-    if (window) startChat(window, payload)
+    if (window) {
+      startChat(
+        (channel, data) => {
+          if (!window.isDestroyed()) window.webContents.send(channel, data)
+        },
+        payload
+      )
+    }
   })
   ipcMain.on('chat:cancel', (_e, { id }: { id: string }) => cancelChat(id))
+
+  // GenNal Mobile: a token-secured LAN server lets a paired phone chat with the
+  // models and mirror the terminals. The renderer drives start/stop and keeps the
+  // bridge's view of the open project + terminal panes up to date.
+  ipcMain.handle('mobile:start', () => startMobileBridge())
+  ipcMain.handle('mobile:stop', () => stopMobileBridge())
+  ipcMain.handle('mobile:status', () => mobileStatus())
+  ipcMain.on('mobile:context', (_e, ctx: MobileContext) => setMobileContext(ctx))
 
   ipcMain.on('win:minimize', (event) => BrowserWindow.fromWebContents(event.sender)?.minimize())
   ipcMain.on('win:maximize', (event) => {
@@ -654,6 +676,7 @@ app.on('window-all-closed', () => {
   killAll()
   stopRun()
   cancelAllChats()
+  stopMobileBridge()
   stopStats()
   if (process.platform !== 'darwin') app.quit()
 })
@@ -662,5 +685,6 @@ app.on('before-quit', () => {
   killAll()
   stopRun()
   cancelAllChats()
+  stopMobileBridge()
   stopStats()
 })

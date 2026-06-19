@@ -12,17 +12,18 @@ website/
 └─ downloads/        local-only installer drop (gitignored — see below)
 ```
 
-## Where the installer is hosted
-The download buttons point at the **GitHub Release** asset, not a local file:
-
-```
-https://github.com/Gen-Group/GenNal/releases/download/v1.0.6/GenNal-Setup-1.0.6.exe
-```
-
-The 82 MB `.exe` is intentionally **not** committed (`.gitignore` excludes
-`website/downloads/*.exe`), so it never bloats the repo or the Vercel deploy.
-GitHub Releases serves it instead. When you cut a new version, upload the new
-installer to a GitHub Release and bump the `v1.0.6` URL in `index.html`.
+## Where the installers are hosted
+- **Windows (`.exe`)** is **self-hosted** from this site at
+  `/downloads/GenNal-Setup-1.0.7.exe`. The current release `.exe` is committed
+  (the `.gitignore` allows only that one file) so it ships inside the Docker
+  build context. Older `.exe`s stay ignored.
+- **macOS (`.dmg`)** is built on CI (`.github/workflows/release-mac.yml`,
+  macOS runner) and uploaded to the matching **GitHub Release**. The download
+  buttons point at:
+  ```
+  https://github.com/Gen-Group/GenNal/releases/download/v1.0.7/GenNal-1.0.7-arm64.dmg
+  https://github.com/Gen-Group/GenNal/releases/download/v1.0.7/GenNal-1.0.7-x64.dmg
+  ```
 
 ## Preview locally
 ```powershell

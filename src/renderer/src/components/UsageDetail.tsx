@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { CliUsage, ModelDef } from '../../../shared/types'
+import type { CliUsage, CliUsageLimit, ModelDef } from '../../../shared/types'
 
 interface Props {
   model: ModelDef
@@ -50,6 +50,28 @@ function limitTone(pct: number): string {
   return 'ok'
 }
 
+/** "2026-06-29 20:50" — fixed, sortable timestamp used by the Term row. */
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/**
+ * The "Term" is the longest reported quota window (e.g. Codex's weekly window):
+ * the date it renews and how many whole days remain until then.
+ */
+function termInfo(limits?: CliUsageLimit[]): { days: number; at: string } | null {
+  const withReset = (limits ?? []).filter((l) => l.resetsAt)
+  if (withReset.length === 0) return null
+  const longest = withReset.reduce((a, b) => ((b.windowMinutes || 0) > (a.windowMinutes || 0) ? b : a))
+  const when = new Date(longest.resetsAt as string)
+  if (Number.isNaN(when.getTime())) return null
+  const days = Math.max(0, Math.ceil((when.getTime() - Date.now()) / 86_400_000))
+  return { days, at: fmtDateTime(longest.resetsAt as string) }
+}
+
 export default function UsageDetail({ model, onBack, onConnect }: Props): JSX.Element {
   const [usage, setUsage] = useState<CliUsage | null>(null)
   const [loading, setLoading] = useState(true)
@@ -70,6 +92,7 @@ export default function UsageDetail({ model, onBack, onConnect }: Props): JSX.El
   const account = usage?.account
   const initial = (account?.name || account?.email || model.label).slice(0, 1).toUpperCase()
 
+  const term = termInfo(usage?.limits)
   const t = usage?.totals
   const statTiles: { label: string; value: string }[] = []
   if (t) {
@@ -138,6 +161,19 @@ export default function UsageDetail({ model, onBack, onConnect }: Props): JSX.El
             </div>
           )}
 
+          {term && (
+            <div className="usage-term">
+              <span className="usage-term-label">
+                <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M2.5 4.5h11v9h-11z M2.5 7h11 M5.5 2.5v3 M10.5 2.5v3" />
+                </svg>
+                Term
+                <span className="usage-term-days">{term.days}d</span>
+              </span>
+              <span className="usage-term-at">{term.at}</span>
+            </div>
+          )}
+
           {usage && usage.periods.length > 0 && (() => {
             const maxMsgs = Math.max(...usage.periods.map((p) => p.messages), 1)
             return (
@@ -153,7 +189,7 @@ export default function UsageDetail({ model, onBack, onConnect }: Props): JSX.El
                         <span className="usage-window-label">{p.label}</span>
                         <span className="usage-window-val">{fmtNum(p.messages)} {p.unit || 'msgs'}</span>
                       </div>
-                      <div className="usage-window-bar"><span style={{ width: `${pct}%`, background: model.accent }} /></div>
+                      <div className="usage-window-bar"><span style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${model.accent}b3, ${model.accent})` }} /></div>
                       {sub.length > 0 && <div className="usage-window-sub">{sub.join(' · ')}</div>}
                     </div>
                   )

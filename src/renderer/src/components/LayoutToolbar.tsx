@@ -19,6 +19,8 @@ export default function LayoutToolbar(): JSX.Element {
   const rows = useStore((s) => s.rows)
   const cols = useStore((s) => s.cols)
   const setGrid = useStore((s) => s.setGrid)
+  const previewCenter = useStore((s) => s.previewCenter)
+  const setPreviewCenter = useStore((s) => s.setPreviewCenter)
   const gridValues = [1, 2, 3]
 
   useEffect(() => {
@@ -52,21 +54,42 @@ export default function LayoutToolbar(): JSX.Element {
 
   return (
     <div className="toolbar">
+      {!previewCenter && (
+        <div className="seg">
+          {MODES.map((m) => (
+            <button
+              key={m.id}
+              className={`seg-btn ${mode === m.id ? 'active' : ''}`}
+              onClick={() => setMode(m.id)}
+            >
+              <span className="seg-ico">{m.icon}</span>
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="seg">
-        {MODES.map((m) => (
-          <button
-            key={m.id}
-            className={`seg-btn ${mode === m.id ? 'active' : ''}`}
-            onClick={() => setMode(m.id)}
-          >
-            <span className="seg-ico">{m.icon}</span>
-            {m.label}
-          </button>
-        ))}
+        <button
+          className={`seg-btn ${previewCenter ? '' : 'active'}`}
+          onClick={() => setPreviewCenter(false)}
+        >
+          <span className="seg-ico">▦</span>
+          Sessions
+        </button>
+        <button
+          className={`seg-btn ${previewCenter ? 'active' : ''}`}
+          title="Show the website preview on the main screen"
+          onClick={() => setPreviewCenter(true)}
+        >
+          <span className="seg-ico">🌐</span>
+          Preview
+        </button>
       </div>
 
       <div className="tb-spacer" />
 
+      {!previewCenter && (
       <div className="grid-dropdowns" ref={menuRef}>
         <div className="grid-select">
           <span className="dim-label">Rows</span>
@@ -126,6 +149,7 @@ export default function LayoutToolbar(): JSX.Element {
           )}
         </div>
       </div>
+      )}
 
       <ModelMenu label="+ New Session" variant="primary" />
     </div>

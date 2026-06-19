@@ -89,6 +89,8 @@ export default function RightPanel(): JSX.Element {
   const panelMaximized = useStore((s) => s.panelMaximized)
   const togglePanelMaximized = useStore((s) => s.togglePanelMaximized)
   const togglePanel = useStore((s) => s.togglePanel)
+  const previewCenter = useStore((s) => s.previewCenter)
+  const setPreviewCenter = useStore((s) => s.setPreviewCenter)
   const openWorkspace = useStore((s) => s.openWorkspace)
   const createWorkspaceFile = useStore((s) => s.createWorkspaceFile)
   const updateWorkspaceContent = useStore((s) => s.updateWorkspaceContent)
@@ -174,24 +176,37 @@ export default function RightPanel(): JSX.Element {
     event.preventDefault()
     event.stopPropagation()
 
+    const handle = event.currentTarget
     const startX = event.clientX
     const startWidth = panelWidth
     const maxWidth = Math.min(720, Math.max(320, window.innerWidth - 520))
+
+    // Capture the pointer on the handle so move/up events keep firing even while
+    // the cursor is over a child <iframe>/<webview> (browser preview) or the
+    // terminal — otherwise those swallow the events and the drag gets stuck.
+    handle.setPointerCapture(event.pointerId)
 
     const onMove = (moveEvent: PointerEvent): void => {
       const delta = panelSide === 'right' ? startX - moveEvent.clientX : moveEvent.clientX - startX
       setPanelWidth(Math.min(maxWidth, Math.max(280, startWidth + delta)))
     }
 
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
+    const onUp = (upEvent: PointerEvent): void => {
+      try {
+        handle.releasePointerCapture(upEvent.pointerId)
+      } catch {
+        /* pointer already released */
+      }
+      handle.removeEventListener('pointermove', onMove)
+      handle.removeEventListener('pointerup', onUp)
+      handle.removeEventListener('pointercancel', onUp)
       document.body.classList.remove('resizing-panel')
     }
 
     document.body.classList.add('resizing-panel')
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    handle.addEventListener('pointermove', onMove)
+    handle.addEventListener('pointerup', onUp)
+    handle.addEventListener('pointercancel', onUp)
   }
 
   // Spin up the panel shell the first time the TERMINAL tab is opened, then keep
@@ -283,6 +298,16 @@ export default function RightPanel(): JSX.Element {
             ))}
           </div>
           <div className="rp-actions">
+            {codeTab === 'PREVIEW' && !previewCenter && (
+              <button
+                className="panel-move-btn"
+                title="Move the preview to the main screen"
+                onClick={() => setPreviewCenter(true)}
+              >
+                <span className="mv-arrow" aria-hidden="true">⤢</span>
+                <span>Move to screen</span>
+              </button>
+            )}
             {showPanelMove && (
               <button
                 className="panel-move-btn"
@@ -421,7 +446,17 @@ export default function RightPanel(): JSX.Element {
           </>
         )}
 
-        {previewMounted && <BrowserPreview active={codeTab === 'PREVIEW'} />}
+        {previewMounted && !previewCenter && <BrowserPreview active={codeTab === 'PREVIEW'} />}
+
+        {codeTab === 'PREVIEW' && previewCenter && (
+          <div className="rp-empty">
+            <p>Preview is open on the main screen.</p>
+            <button className="panel-move-btn" onClick={() => setPreviewCenter(false)}>
+              <span className="mv-arrow" aria-hidden="true">‹</span>
+              <span>Bring preview back here</span>
+            </button>
+          </div>
+        )}
 
         {terminalMounted && (
           <PanelTerminal

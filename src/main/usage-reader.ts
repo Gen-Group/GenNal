@@ -123,6 +123,19 @@ async function readClaudeUsage(home: string): Promise<CliUsage> {
     usage.account = account
   }
 
+  // Claude Code logs every prompt to history.jsonl with a millisecond `timestamp`
+  // and `sessionId`. Unlike stats-cache.json (recomputed only periodically, so it
+  // lags by days), this file is written live — we use it for the recent windows
+  // and the true "last active" time so today's activity isn't shown as zero.
+  const histRows = await readJsonl(join(home, '.claude', 'history.jsonl'))
+  const entries: TimedEntry[] = []
+  for (const row of histRows) {
+    const ts = typeof row.timestamp === 'number' ? row.timestamp : NaN
+    if (Number.isFinite(ts)) {
+      entries.push({ ts, session: typeof row.sessionId === 'string' ? row.sessionId : '' })
+    }
+  }
+
   const stats = await readJson<{
     dailyActivity?: DailyActivity[]
     totalSessions?: number
@@ -131,15 +144,28 @@ async function readClaudeUsage(home: string): Promise<CliUsage> {
     lastComputedDate?: string
     hourCounts?: Record<string, number>
   }>(join(home, '.claude', 'stats-cache.json'))
+  const daily = stats && Array.isArray(stats.dailyActivity) ? stats.dailyActivity : []
 
-  if (stats) {
+  // Recent windows: prefer the live prompt history; fall back to the cached
+  // daily activity (counts messages) only when history is unavailable.
+  if (entries.length > 0) {
     usage.available = true
-    const daily = Array.isArray(stats.dailyActivity) ? stats.dailyActivity : []
+    usage.periods = [
+      windowFromEntries('Today', entries, 1, 'prompts'),
+      windowFromEntries('Last 7 days', entries, 7, 'prompts'),
+      windowFromEntries('Last 30 days', entries, 30, 'prompts')
+    ]
+  } else if (daily.length > 0) {
+    usage.available = true
     usage.periods = [
       summarize('Today', daily, 1),
       summarize('Last 7 days', daily, 7),
       summarize('Last 30 days', daily, 30)
     ]
+  }
+
+  if (stats) {
+    usage.available = true
 
     let busiestHour: number | undefined
     if (stats.hourCounts) {
@@ -152,7 +178,13 @@ async function readClaudeUsage(home: string): Promise<CliUsage> {
       }
     }
 
-    const lastActive = daily.length > 0 ? daily[daily.length - 1].date : undefined
+    // True last-active comes from live history; fall back to the cache's newest day.
+    const lastActive =
+      entries.length > 0
+        ? new Date(Math.max(...entries.map((e) => e.ts))).toISOString()
+        : daily.length > 0
+          ? daily[daily.length - 1].date
+          : undefined
     usage.totals = {
       sessions: stats.totalSessions,
       messages: stats.totalMessages,
@@ -161,9 +193,22 @@ async function readClaudeUsage(home: string): Promise<CliUsage> {
       lastActive,
       busiestHour
     }
-    if (stats.lastComputedDate) {
-      usage.note = `Claude local stats last computed ${stats.lastComputedDate}.`
+    usage.note =
+      entries.length > 0 && stats.lastComputedDate
+        ? `Recent windows are live from prompt history; all-time totals are from Claude's stats cache (last computed ${stats.lastComputedDate}).`
+        : stats.lastComputedDate
+          ? `Claude local stats last computed ${stats.lastComputedDate}.`
+          : usage.note
+  } else if (entries.length > 0) {
+    // History only (no stats cache): still give real totals from the prompt log.
+    const timestamps = entries.map((e) => e.ts)
+    usage.totals = {
+      sessions: new Set(entries.map((e) => e.session).filter(Boolean)).size || undefined,
+      messages: entries.length,
+      firstSession: new Date(Math.min(...timestamps)).toISOString(),
+      lastActive: new Date(Math.max(...timestamps)).toISOString()
     }
+    usage.note = 'Activity reflects Claude prompt history on this device.'
   }
 
   if (!usage.available) {

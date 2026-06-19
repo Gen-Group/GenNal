@@ -218,6 +218,8 @@ export default function Sidebar(): JSX.Element {
   const toggleAutomations = useStore((s) => s.toggleAutomations)
   const historyOpen = useStore((s) => s.historyOpen)
   const toggleHistory = useStore((s) => s.toggleHistory)
+  const mobileOpen = useStore((s) => s.mobileOpen)
+  const toggleMobile = useStore((s) => s.toggleMobile)
   const profile = useStore((s) => s.profile)
   const toggleProfileSetup = useStore((s) => s.toggleProfileSetup)
   const workspace = useStore((s) => s.workspace)
@@ -448,7 +450,11 @@ export default function Sidebar(): JSX.Element {
           </span>
           <span className="nav-label">History</span>
         </button>
-        <button className="side-nav-item soon" disabled title="Mobile — coming soon">
+        <button
+          className={`side-nav-item ${mobileOpen ? 'active' : ''}`}
+          title="GenNal Mobile — pair your phone"
+          onClick={() => toggleMobile(true)}
+        >
           <span className="nav-ico" aria-hidden="true">
             <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
               <rect x="4.5" y="2" width="7" height="12" rx="1.6" />
@@ -456,7 +462,6 @@ export default function Sidebar(): JSX.Element {
             </svg>
           </span>
           <span className="nav-label">GenNal Mobile</span>
-          <span className="soon-pill">Soon</span>
         </button>
         <button className="side-nav-item" title="Search (Ctrl K)" onClick={() => togglePalette(true)}>
           <span className="nav-ico" aria-hidden="true">

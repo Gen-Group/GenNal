@@ -36,7 +36,14 @@ function shortLabel(url: string): string {
   }
 }
 
-export default function BrowserPreview({ active }: { active: boolean }): JSX.Element {
+export default function BrowserPreview({
+  active,
+  center = false
+}: {
+  active: boolean
+  /** Rendered as the full-screen center view rather than inside the code panel. */
+  center?: boolean
+}): JSX.Element {
   const webviewRef = useRef<WebviewElement | null>(null)
   const readyRef = useRef(false)
   const lastNonceRef = useRef(-1)
@@ -45,6 +52,7 @@ export default function BrowserPreview({ active }: { active: boolean }): JSX.Ele
   const previewUrl = useStore((s) => s.previewUrl)
   const previewNonce = useStore((s) => s.previewNonce)
   const homeUrl = useStore((s) => s.browserSettings.homeUrl)
+  const setPreviewCenter = useStore((s) => s.setPreviewCenter)
 
   const home = homeUrl.trim() || FALLBACK_HOME
   // Resolved once: the very first page the guest loads via its `src` attribute.
@@ -172,8 +180,21 @@ export default function BrowserPreview({ active }: { active: boolean }): JSX.Ele
   const openExternal = (): void => window.api.openExternal(currentUrl)
 
   return (
-    <div className={`rp-browser${active ? '' : ' hidden'}`}>
+    <div className={`rp-browser${center ? ' rp-browser--center' : ''}${active ? '' : ' hidden'}`}>
       <div className="rp-browser-bar">
+        {center && (
+          <button
+            className="rp-browser-nav"
+            title="Move preview back to the side panel"
+            onClick={() => setPreviewCenter(false)}
+            aria-label="Move preview back to the side panel"
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="2" y="3" width="12" height="10" rx="1.5" />
+              <path d="M10 3v10" />
+            </svg>
+          </button>
+        )}
         <button className="rp-browser-nav" title="Back" disabled={!canBack} onClick={goBack} aria-label="Back">
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M10 3 5 8l5 5" />
