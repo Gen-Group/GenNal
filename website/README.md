@@ -16,13 +16,13 @@ website/
 The download buttons point at the **GitHub Release** asset, not a local file:
 
 ```
-https://github.com/Gen-Group/GenNal/releases/download/v1.0.5/GenNal-Setup-1.0.5.exe
+https://github.com/Gen-Group/GenNal/releases/download/v1.0.6/GenNal-Setup-1.0.6.exe
 ```
 
 The 82 MB `.exe` is intentionally **not** committed (`.gitignore` excludes
 `website/downloads/*.exe`), so it never bloats the repo or the Vercel deploy.
 GitHub Releases serves it instead. When you cut a new version, upload the new
-installer to a GitHub Release and bump the `v1.0.5` URL in `index.html`.
+installer to a GitHub Release and bump the `v1.0.6` URL in `index.html`.
 
 ## Preview locally
 ```powershell
