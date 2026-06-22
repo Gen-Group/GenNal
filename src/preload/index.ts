@@ -6,6 +6,8 @@ import type {
   ChatExit,
   ChatSendPayload,
   CliUsage,
+  EmulatorList,
+  FolderScanResult,
   GithubFetchPayload,
   GithubWorkResult,
   MobileContext,
@@ -50,10 +52,18 @@ const api = {
   fetchGithubWork: (payload: GithubFetchPayload): Promise<GithubWorkResult> =>
     ipcRenderer.invoke('github:fetch', payload),
 
+  emulators: {
+    list: (): Promise<EmulatorList> => ipcRenderer.invoke('emulators:list')
+  },
+
   openWorkspace: (kind: WorkspaceKind): Promise<WorkspaceOpenResult | null> =>
     ipcRenderer.invoke('workspace:open', kind),
   openWorkspacePath: (payload: WorkspaceOpenPathPayload): Promise<WorkspaceOpenResult> =>
     ipcRenderer.invoke('workspace:open-path', payload),
+  pickProjectFolder: (): Promise<FolderScanResult | null> =>
+    ipcRenderer.invoke('workspace:pick-folder'),
+  scanProjectFolder: (path: string): Promise<FolderScanResult> =>
+    ipcRenderer.invoke('workspace:scan-folder', path),
   readWorkspaceFile: (file: WorkspaceFile): Promise<WorkspaceReadResult> =>
     ipcRenderer.invoke('workspace:read-file', file),
   readWorkspaceImage: (file: WorkspaceFile): Promise<WorkspaceImageResult> =>
@@ -62,8 +72,8 @@ const api = {
     ipcRenderer.invoke('workspace:write-file', payload),
   createWorkspaceEntry: (payload: WorkspaceCreateEntryPayload): Promise<WorkspaceOpenResult> =>
     ipcRenderer.invoke('workspace:create-entry', payload),
-  saveClipboardImage: (): Promise<AttachmentSaveResult | null> =>
-    ipcRenderer.invoke('attachments:save-clipboard-image'),
+  saveClipboardImage: (projectPath?: string): Promise<AttachmentSaveResult | null> =>
+    ipcRenderer.invoke('attachments:save-clipboard-image', projectPath),
   pickImages: (): Promise<AttachmentSaveResult[]> => ipcRenderer.invoke('attachments:pick-images'),
   writeClipboardText: (text: string): void => ipcRenderer.send('clipboard:write-text', text),
   readClipboardText: (): Promise<string> => ipcRenderer.invoke('clipboard:read-text'),

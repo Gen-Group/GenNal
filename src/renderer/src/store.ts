@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import type {
+  EmulatorInfo,
+  FolderScanResult,
   ModelDef,
   RunExit,
   RunOutput,
@@ -298,6 +300,8 @@ interface AppState {
   tasksOpen: boolean
   automationsOpen: boolean
   historyOpen: boolean
+  /** Mobile Simulators (Android AVD / iOS Simulator) launcher panel is open. */
+  simulatorsOpen: boolean
   /** GenNal Mobile pairing dialog (QR code) is open. */
   mobileOpen: boolean
   githubToken: string
@@ -315,6 +319,8 @@ interface AppState {
   workspace: WorkspaceOpenResult | null
   workspaceError: string | null
   recentProjects: RecentProject[]
+  /** Pending "import repositories from folder" dialog data (null = closed). */
+  importRepos: FolderScanResult | null
   imagePreview: ImagePreview | null
   runOutput: RunOutput[]
   running: boolean
@@ -352,6 +358,9 @@ interface AppState {
   toggleTasks: (v?: boolean) => void
   toggleAutomations: (v?: boolean) => void
   toggleHistory: (v?: boolean) => void
+  toggleSimulators: (v?: boolean) => void
+  /** Boot an emulator/simulator into a new managed terminal pane. */
+  bootSimulator: (emulator: EmulatorInfo) => void
   toggleMobile: (v?: boolean) => void
   setGithubToken: (token: string) => void
   addAutomationFromTemplate: (template: AutomationTemplate) => string
@@ -373,7 +382,14 @@ interface AppState {
   clearChatHistory: () => void
   toggleProfileSetup: (v?: boolean) => void
   openWorkspace: (kind: WorkspaceKind) => Promise<void>
-  openProject: (path: string) => Promise<void>
+  openProject: (path: string, nameOverride?: string) => Promise<void>
+  /** Pick a folder, then either open it or offer the import-repos dialog. */
+  browseProject: () => Promise<void>
+  /** Add the selected child repos as separate projects, opening the first. */
+  importReposSeparately: (paths: string[]) => Promise<void>
+  /** Open the picked folder as a single (monorepo) project under `name`. */
+  importAsMonorepo: (name?: string) => Promise<void>
+  dismissImportRepos: () => void
   removeRecentProject: (path: string) => void
   restoreWorkspace: () => Promise<void>
   clearWorkspace: () => void
@@ -1007,6 +1023,7 @@ export const useStore = create<AppState>((set, get) => ({
   mobileOpen: false,
   automationsOpen: false,
   historyOpen: false,
+  simulatorsOpen: false,
   githubToken: loadGithubToken(),
   automations: loadAutomations(),
   automationRuns: loadAutomationRuns(),
@@ -1022,6 +1039,7 @@ export const useStore = create<AppState>((set, get) => ({
   workspace: null,
   workspaceError: null,
   recentProjects: loadRecentProjects(),
+  importRepos: null,
   imagePreview: null,
   runOutput: [],
   running: false,
@@ -1160,22 +1178,53 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => {
       const tasksOpen = v ?? !s.tasksOpen
       return tasksOpen
-        ? { tasksOpen, automationsOpen: false, historyOpen: false }
+        ? { tasksOpen, automationsOpen: false, historyOpen: false, simulatorsOpen: false }
         : { tasksOpen }
     }),
   toggleAutomations: (v) =>
     set((s) => {
       const automationsOpen = v ?? !s.automationsOpen
       return automationsOpen
-        ? { automationsOpen, tasksOpen: false, historyOpen: false }
+        ? { automationsOpen, tasksOpen: false, historyOpen: false, simulatorsOpen: false }
         : { automationsOpen }
     }),
   toggleHistory: (v) =>
     set((s) => {
       const historyOpen = v ?? !s.historyOpen
       return historyOpen
-        ? { historyOpen, tasksOpen: false, automationsOpen: false }
+        ? { historyOpen, tasksOpen: false, automationsOpen: false, simulatorsOpen: false }
         : { historyOpen }
+    }),
+  toggleSimulators: (v) =>
+    set((s) => {
+      const simulatorsOpen = v ?? !s.simulatorsOpen
+      return simulatorsOpen
+        ? { simulatorsOpen, tasksOpen: false, automationsOpen: false, historyOpen: false }
+        : { simulatorsOpen }
+    }),
+  bootSimulator: (emulator) =>
+    set((s) => {
+      const projectPath = activeProjectPath(s.workspace)
+      const accent = emulator.platform === 'android' ? '#3ddc84' : '#0a84ff'
+      const session: Session = {
+        id: uid(),
+        // Reuse the plain-shell model so the pane's "new terminal" action and
+        // status handling behave like any other shell pane.
+        modelId: 'custom',
+        label: emulator.name,
+        tag: emulator.platform === 'android' ? 'android-emulator' : 'ios-simulator',
+        accent,
+        command: emulator.launchCommand,
+        status: 'idle',
+        cwd: projectPath,
+        projectPath
+      }
+      // Leave the launcher and show the grid so the booting pane is visible.
+      return {
+        sessions: [...s.sessions, session],
+        activeId: session.id,
+        simulatorsOpen: false
+      }
     }),
   addAutomationFromTemplate: (template) => {
     const id = uidPrefixed('auto_')
@@ -1504,10 +1553,12 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   // Reopen a project from the recents list (or anywhere we have its path).
-  openProject: async (path) => {
+  // `nameOverride` lets the import-as-monorepo flow label the parent folder.
+  openProject: async (path, nameOverride) => {
     set({ workspaceError: null })
     try {
-      const workspace = await window.api.openWorkspacePath({ kind: 'project', path })
+      const opened = await window.api.openWorkspacePath({ kind: 'project', path })
+      const workspace = nameOverride?.trim() ? { ...opened, name: nameOverride.trim() } : opened
       saveWorkspaceRef(workspace)
       rememberProject(set, get, workspace)
       set((s) => ({
@@ -1520,6 +1571,52 @@ export const useStore = create<AppState>((set, get) => ({
       set({ workspaceError: err instanceof Error ? err.message : 'Unable to open project.' })
     }
   },
+
+  // Open the OS folder picker, then decide: a folder of several repos/projects
+  // opens the import dialog; anything else opens straight away.
+  browseProject: async () => {
+    set({ workspaceError: null })
+    try {
+      const scan = await window.api.pickProjectFolder()
+      if (!scan) return
+      if (!scan.isRepo && scan.repos.length >= 2) {
+        set({ importRepos: scan })
+        return
+      }
+      await get().openProject(scan.path)
+    } catch (err) {
+      set({ workspaceError: err instanceof Error ? err.message : 'Unable to open project.' })
+    }
+  },
+
+  importReposSeparately: async (paths) => {
+    const scan = get().importRepos
+    if (!scan) return
+    const chosen = scan.repos.filter((repo) => paths.includes(repo.path))
+    if (chosen.length === 0) return
+
+    // Remember every chosen repo in the Projects list (privacy-gated), then open
+    // the first one as the active workspace.
+    if (get().privacySettings.rememberWorkspace) {
+      let recentProjects = get().recentProjects
+      for (const repo of chosen) {
+        recentProjects = withProjectRemembered(recentProjects, { path: repo.path, name: repo.name })
+      }
+      saveRecentProjects(recentProjects)
+      set({ recentProjects })
+    }
+    set({ importRepos: null })
+    await get().openProject(chosen[0].path)
+  },
+
+  importAsMonorepo: async (name) => {
+    const scan = get().importRepos
+    if (!scan) return
+    set({ importRepos: null })
+    await get().openProject(scan.path, name?.trim() || scan.name)
+  },
+
+  dismissImportRepos: () => set({ importRepos: null }),
 
   removeRecentProject: (path) => {
     set((s) => {

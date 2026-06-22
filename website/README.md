@@ -14,15 +14,15 @@ website/
 
 ## Where the installers are hosted
 - **Windows (`.exe`)** is **self-hosted** from this site at
-  `/downloads/GenNal-Setup-1.0.7.exe`. The current release `.exe` is committed
+  `/downloads/GenNal-Setup-1.0.8.exe`. The current release `.exe` is committed
   (the `.gitignore` allows only that one file) so it ships inside the Docker
   build context. Older `.exe`s stay ignored.
 - **macOS (`.dmg`)** is built on CI (`.github/workflows/release-mac.yml`,
   macOS runner) and uploaded to the matching **GitHub Release**. The download
   buttons point at:
   ```
-  https://github.com/Gen-Group/GenNal/releases/download/v1.0.7/GenNal-1.0.7-arm64.dmg
-  https://github.com/Gen-Group/GenNal/releases/download/v1.0.7/GenNal-1.0.7-x64.dmg
+  https://github.com/Gen-Group/GenNal/releases/download/v1.0.8/GenNal-1.0.8-arm64.dmg
+  https://github.com/Gen-Group/GenNal/releases/download/v1.0.8/GenNal-1.0.8-x64.dmg
   ```
 
 ## Preview locally

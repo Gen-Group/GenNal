@@ -16,6 +16,8 @@ interface BridgeState {
   server: Server
   token: string
   host: string
+  /** Every LAN address the server is reachable on, best guess first. */
+  addresses: string[]
   port: number
   /** Open Server-Sent-Events connections streaming chat replies to phones. */
   chatStreams: Set<ServerResponse>
@@ -36,22 +38,33 @@ export function setMobileContext(next: MobileContext): void {
   context = { cwd: next.cwd, panes: Array.isArray(next.panes) ? next.panes : [] }
 }
 
-// Pick a LAN-reachable IPv4 address. A phone can only reach the desktop over a
-// real network address, never 127.0.0.1, so prefer private ranges in the order
-// home/office networks hand them out.
-function lanAddress(): string | null {
-  const candidates: string[] = []
-  for (const addrs of Object.values(networkInterfaces())) {
+// Virtual adapters (VirtualBox/VMware host-only nets, Hyper-V/WSL "vEthernet",
+// Docker bridges) hand out private IPv4s in the same ranges as real Wi-Fi, but a
+// phone can't route to them — so the QR pointing at one just times out. Match
+// them by interface name and push them to the back of the list.
+const VIRTUAL_IFACE =
+  /\b(virtual|vmware|vbox|virtualbox|hyper-?v|vethernet|wsl|docker|loopback|default switch|tailscale|zerotier|tunnel|tap)\b/i
+
+// Collect every LAN-reachable IPv4 address, best candidate first. A phone can
+// only reach the desktop over a real network address, never 127.0.0.1, so prefer
+// physical adapters and the private ranges home/office networks hand out.
+function lanAddresses(): string[] {
+  const candidates: { ip: string; virtual: boolean }[] = []
+  for (const [name, addrs] of Object.entries(networkInterfaces())) {
+    const virtual = VIRTUAL_IFACE.test(name)
     for (const addr of addrs ?? []) {
       if (addr.family !== 'IPv4' || addr.internal) continue
-      candidates.push(addr.address)
+      candidates.push({ ip: addr.address, virtual })
     }
   }
-  if (candidates.length === 0) return null
-  const rank = (ip: string): number =>
+  const rangeRank = (ip: string): number =>
     ip.startsWith('192.168.') ? 0 : ip.startsWith('10.') ? 1 : ip.startsWith('172.') ? 2 : 3
-  candidates.sort((a, b) => rank(a) - rank(b))
-  return candidates[0]
+  candidates.sort((a, b) => {
+    // Real adapters always beat virtual ones, then sort by private-range order.
+    if (a.virtual !== b.virtual) return a.virtual ? 1 : -1
+    return rangeRank(a.ip) - rangeRank(b.ip)
+  })
+  return candidates.map((c) => c.ip)
 }
 
 function statusFrom(s: BridgeState): MobileStatus {
@@ -59,6 +72,7 @@ function statusFrom(s: BridgeState): MobileStatus {
   return {
     running: true,
     host: s.host,
+    addresses: s.addresses,
     port: s.port,
     token: s.token,
     url: `${base}/?t=${s.token}`,
@@ -262,7 +276,8 @@ function listen(server: Server, port: number, host: string): Promise<number> {
 export async function startMobileBridge(): Promise<MobileStatus> {
   if (state) return statusFrom(state)
 
-  const host = lanAddress()
+  const addresses = lanAddresses()
+  const host = addresses[0]
   if (!host) {
     return {
       running: false,
@@ -313,7 +328,7 @@ export async function startMobileBridge(): Promise<MobileStatus> {
     }
   }, 25_000)
 
-  state = { server, token, host, port, chatStreams, ptyStreams, detachPty, heartbeat }
+  state = { server, token, host, addresses, port, chatStreams, ptyStreams, detachPty, heartbeat }
   return statusFrom(state)
 }
 

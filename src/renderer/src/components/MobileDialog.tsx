@@ -13,6 +13,9 @@ export default function MobileDialog(): JSX.Element | null {
   const [qr, setQr] = useState('')
   const [starting, setStarting] = useState(false)
   const [copied, setCopied] = useState(false)
+  // Which LAN address the QR currently points at. The server listens on every
+  // interface, so switching this just re-encodes the QR — no restart needed.
+  const [activeHost, setActiveHost] = useState<string | null>(null)
   // Track the latest "open" so an async start that resolves after the dialog was
   // closed doesn't leave the server running.
   const openRef = useRef(open)
@@ -32,16 +35,8 @@ export default function MobileDialog(): JSX.Element | null {
           return
         }
         setStatus(s)
+        setActiveHost(s.host ?? null)
         setStarting(false)
-        if (s.running && s.url) {
-          void QRCode.toDataURL(s.url, {
-            margin: 1,
-            width: 260,
-            color: { dark: '#10101a', light: '#ffffff' }
-          }).then((data) => {
-            if (!cancelled) setQr(data)
-          })
-        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -53,9 +48,34 @@ export default function MobileDialog(): JSX.Element | null {
       cancelled = true
       void window.api.mobile.stop()
       setStatus(null)
+      setActiveHost(null)
       setQr('')
     }
   }, [open])
+
+  // (Re)generate the QR whenever the running server or the chosen address
+  // changes. Building the URL here (rather than using status.url) lets the user
+  // switch to another LAN address without restarting the server.
+  const port = status?.port
+  const token = status?.token
+  useEffect(() => {
+    if (!status?.running || !activeHost || !port || !token) {
+      setQr('')
+      return
+    }
+    let cancelled = false
+    const url = `http://${activeHost}:${port}/?t=${token}`
+    void QRCode.toDataURL(url, {
+      margin: 1,
+      width: 260,
+      color: { dark: '#10101a', light: '#ffffff' }
+    }).then((data) => {
+      if (!cancelled) setQr(data)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [status?.running, activeHost, port, token])
 
   // Keep the bridge's view of the open project + terminals current while paired.
   useEffect(() => {
@@ -69,9 +89,14 @@ export default function MobileDialog(): JSX.Element | null {
   if (!open) return null
 
   const close = (): void => toggleMobile(false)
+  const host = activeHost ?? status?.host ?? null
+  const currentUrl =
+    host && port && token ? `http://${host}:${port}/?t=${token}` : status?.url
+  const currentDisplayUrl = host && port ? `http://${host}:${port}` : status?.displayUrl
+  const addresses = status?.addresses ?? []
   const copyUrl = (): void => {
-    if (!status?.url) return
-    window.api.writeClipboardText(status.url)
+    if (!currentUrl) return
+    window.api.writeClipboardText(currentUrl)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1500)
   }
@@ -125,11 +150,30 @@ export default function MobileDialog(): JSX.Element | null {
             </div>
 
             <div className="mobile-url">
-              <code>{status.displayUrl}</code>
+              <code>{currentDisplayUrl}</code>
               <button className="mobile-copy" onClick={copyUrl}>
                 {copied ? 'Copied' : 'Copy link'}
               </button>
             </div>
+
+            {addresses.length > 1 && (
+              <div className="mobile-addresses">
+                <span className="mobile-addresses-label">
+                  Page won&apos;t load? Pick the address on your Wi-Fi network:
+                </span>
+                <div className="mobile-addresses-list">
+                  {addresses.map((addr) => (
+                    <button
+                      key={addr}
+                      className={'mobile-addr' + (addr === host ? ' active' : '')}
+                      onClick={() => setActiveHost(addr)}
+                    >
+                      {addr}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="mobile-note">
               <span className="mobile-lock" aria-hidden="true">🔒</span>

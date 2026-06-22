@@ -49,6 +49,13 @@ export interface WorkspaceOpenResult {
   path: string
   name: string
   files: WorkspaceFile[]
+  /**
+   * Relative paths of every directory discovered in the project (POSIX
+   * separators). Returned independently of the file list so the workspace tree
+   * can show nested folders — including sibling repos in a multi-repo folder —
+   * even when the file-count cap is reached deep inside one branch.
+   */
+  folders?: string[]
   git?: {
     branch: string
     remoteUrl?: string
@@ -63,6 +70,24 @@ export interface WorkspaceOpenPathPayload {
   kind: WorkspaceKind
   path: string
   selectedFilePath?: string
+}
+
+/** A child project/repository discovered inside a picked folder. */
+export interface RepoCandidate {
+  name: string
+  path: string
+  /** True when the folder is a git repository (has a .git entry). */
+  isRepo: boolean
+}
+
+/** Result of picking/scanning a folder to decide how to import it. */
+export interface FolderScanResult {
+  path: string
+  name: string
+  /** True when the picked folder is itself a git repository. */
+  isRepo: boolean
+  /** Immediate child folders that look like repositories or projects. */
+  repos: RepoCandidate[]
 }
 
 export interface WorkspaceReadResult {
@@ -221,11 +246,48 @@ export interface MobileStatus {
   /** Same URL without the token, for display. */
   displayUrl?: string
   host?: string
+  /** All LAN addresses the server is reachable on, best guess first. Lets the
+   * phone fall back to another address when the default one isn't routable. */
+  addresses?: string[]
   port?: number
   /** Random pairing token; only devices that scanned the QR can connect. */
   token?: string
   /** Set when the server could not start (e.g. no LAN address, port busy). */
   error?: string
+}
+
+export type EmulatorPlatform = 'android' | 'ios'
+
+/** A bootable mobile emulator/simulator found on this machine. */
+export interface EmulatorInfo {
+  /** Stable id: the AVD name (Android) or device UDID (iOS). */
+  id: string
+  /** Display name, e.g. "Pixel 7 API 34" or "iPhone 15 Pro". */
+  name: string
+  platform: EmulatorPlatform
+  /** Secondary line, e.g. the iOS runtime ("iOS 17.2") or "Android Virtual Device". */
+  detail?: string
+  /** Current device state when known, e.g. "Booted" / "Shutdown" (iOS). */
+  state?: string
+  /** Shell command that boots the device, ready to run in a terminal pane. */
+  launchCommand: string
+}
+
+/** Whether the toolchain for a platform is installed and where it was found. */
+export interface EmulatorToolStatus {
+  available: boolean
+  /** Friendly guidance shown when the toolchain is missing. */
+  hint?: string
+  /** Resolved SDK root / tool path, when found. */
+  path?: string
+}
+
+/** Emulators discovered on this machine, grouped by platform. */
+export interface EmulatorList {
+  android: EmulatorInfo[]
+  ios: EmulatorInfo[]
+  androidTool: EmulatorToolStatus
+  iosTool: EmulatorToolStatus
 }
 
 export type GithubWorkKind = 'issue' | 'pr'

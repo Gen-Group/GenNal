@@ -26,6 +26,7 @@ export default function CommandPalette(): JSX.Element | null {
   const setActive = useStore((s) => s.setActive)
   const setGrid = useStore((s) => s.setGrid)
   const openWorkspace = useStore((s) => s.openWorkspace)
+  const browseProject = useStore((s) => s.browseProject)
   const createWorkspaceFile = useStore((s) => s.createWorkspaceFile)
   const createWorkspaceFolder = useStore((s) => s.createWorkspaceFolder)
   const toggleSettings = useStore((s) => s.toggleSettings)
@@ -152,7 +153,7 @@ export default function CommandPalette(): JSX.Element | null {
         label: 'Upload Project',
         hint: 'workspace',
         keywords: 'open upload project folder workspace',
-        run: () => void openWorkspace('project')
+        run: () => void browseProject()
       },
       {
         key: 'browser-preview',
@@ -204,6 +205,7 @@ export default function CommandPalette(): JSX.Element | null {
     setActive,
     setGrid,
     openWorkspace,
+    browseProject,
     createWorkspaceFile,
     createWorkspaceFolder,
     toggleSettings,

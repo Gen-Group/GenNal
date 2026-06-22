@@ -6,4 +6,4 @@ dist/
 # Installer is self-hosted via the website Docker image, so the current
 # release .exe IS committed (needed in the build context). Ignore all others.
 website/downloads/*.exe
-!website/downloads/GenNal-Setup-1.0.7.exe
+!website/downloads/GenNal-Setup-1.0.8.exe

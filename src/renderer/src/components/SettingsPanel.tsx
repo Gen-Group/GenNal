@@ -184,6 +184,15 @@ interface SettingsItem {
   badge?: string
 }
 
+const PROJECT_ACCENTS = ['#7c5cff', '#2f8cff', '#22c55e', '#f97316', '#ec4899', '#14b8a6', '#a78bfa', '#f59e0b']
+
+/** Stable accent for a project's monogram, derived from its path. */
+function projectAccent(path: string): string {
+  let hash = 0
+  for (let i = 0; i < path.length; i++) hash = (hash * 31 + path.charCodeAt(i)) | 0
+  return PROJECT_ACCENTS[Math.abs(hash) % PROJECT_ACCENTS.length]
+}
+
 type TaskPriority = 'low' | 'normal' | 'high'
 type TaskSourceId = 'workspace' | 'git' | 'runs' | 'terminal' | 'commands'
 
@@ -591,6 +600,9 @@ export default function SettingsPanel(): JSX.Element | null {
   const toggleProfileSetup = useStore((s) => s.toggleProfileSetup)
   const workspace = useStore((s) => s.workspace)
   const openWorkspace = useStore((s) => s.openWorkspace)
+  const browseProject = useStore((s) => s.browseProject)
+  const openProject = useStore((s) => s.openProject)
+  const recentProjects = useStore((s) => s.recentProjects)
   const clearWorkspace = useStore((s) => s.clearWorkspace)
   const toggleMobile = useStore((s) => s.toggleMobile)
   const [active, setActive] = useState<SettingsKey>('appearance')
@@ -906,6 +918,36 @@ export default function SettingsPanel(): JSX.Element | null {
               ))}
             </div>
           ))}
+
+          {recentProjects.length > 0 && (
+            <div className="settings-group" key="projects">
+              <div className="settings-group-title">Projects</div>
+              {recentProjects.map((project) => {
+                const isActive =
+                  workspace?.kind === 'project' &&
+                  workspace.path.toLowerCase() === project.path.toLowerCase()
+                return (
+                  <button
+                    key={project.path}
+                    className={`settings-nav-item settings-project-item ${isActive ? 'active' : ''}`}
+                    title={project.path}
+                    onClick={() => {
+                      void openProject(project.path)
+                      toggleSettings(false)
+                    }}
+                  >
+                    <span
+                      className="settings-project-mono"
+                      style={{ background: projectAccent(project.path) }}
+                    >
+                      {project.name.trim().charAt(0).toUpperCase() || 'P'}
+                    </span>
+                    <span className="settings-project-name">{project.name}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </aside>
 
         <main className="settings-main">
@@ -963,7 +1005,7 @@ export default function SettingsPanel(): JSX.Element | null {
                 </div>
                 <div className="general-actions">
                   <button className="settings-close" onClick={() => void openWorkspace('file')}>Open file</button>
-                  <button className="settings-close" onClick={() => void openWorkspace('project')}>Open project</button>
+                  <button className="settings-close" onClick={() => void browseProject()}>Open project</button>
                   <button className="settings-close danger" disabled={!workspace} onClick={clearWorkspace}>Forget</button>
                 </div>
               </div>

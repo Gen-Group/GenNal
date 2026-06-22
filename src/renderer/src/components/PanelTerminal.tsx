@@ -9,7 +9,9 @@ import {
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import { useStore, scrollbackLines, windowsShellCommand } from '../store'
+import { SearchAddon } from '@xterm/addon-search'
+import { useStore, scrollbackLines, windowsShellCommand, activeProjectPath } from '../store'
+import TerminalFindBar from './TerminalFindBar'
 
 // A single dedicated shell that lives in the right panel's TERMINAL tab.
 // Reuses the same PTY bridge as the model panes; an empty command spawns a
@@ -45,6 +47,8 @@ export default function PanelTerminal({
   const hostRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
+  const searchRef = useRef<SearchAddon | null>(null)
+  const [findOpen, setFindOpen] = useState(false)
   const noticeTimerRef = useRef<number | null>(null)
   // Stable hook to the latest paste handler for the lifecycle-keyed effect, plus
   // a guard against the same paste running twice (keybinding + DOM event).
@@ -83,6 +87,10 @@ export default function PanelTerminal({
     fitRef.current = fit
     term.loadAddon(fit)
 
+    const search = new SearchAddon()
+    term.loadAddon(search)
+    searchRef.current = search
+
     // Make URLs clickable: open in the in-app website preview, and track the
     // hovered URL so a right-click can open it too.
     const openUrl = (uri: string): void => {
@@ -110,6 +118,7 @@ export default function PanelTerminal({
       const mod = window.api.isMac ? event.metaKey : event.ctrlKey
       const isC = event.key === 'c' || event.key === 'C'
       const isV = event.key === 'v' || event.key === 'V'
+      const isF = event.key === 'f' || event.key === 'F'
       if (mod && isC && (event.shiftKey || term.hasSelection())) {
         const selection = term.getSelection()
         if (selection) {
@@ -120,6 +129,10 @@ export default function PanelTerminal({
       }
       if (mod && isV) {
         pasteRef.current()
+        return false
+      }
+      if (mod && isF && !event.shiftKey && !event.altKey) {
+        setFindOpen(true)
         return false
       }
       return true
@@ -177,6 +190,7 @@ export default function PanelTerminal({
       term.dispose()
       terminalRef.current = null
       fitRef.current = null
+      searchRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epoch])
@@ -214,7 +228,9 @@ export default function PanelTerminal({
 
   const attachClipboardImage = async (): Promise<void> => {
     try {
-      const attachment = await window.api.saveClipboardImage()
+      const attachment = await window.api.saveClipboardImage(
+        activeProjectPath(useStore.getState().workspace)
+      )
       if (!attachment) return
       insertAttachmentPath(attachment.path)
       showAttachmentNotice({ name: attachment.name, src: attachment.dataUrl })
@@ -353,6 +369,16 @@ export default function PanelTerminal({
         onDragOver={onDragOver}
         onDrop={onDrop}
       />
+      {findOpen && searchRef.current && (
+        <TerminalFindBar
+          search={searchRef.current}
+          onClose={() => {
+            searchRef.current?.clearDecorations()
+            setFindOpen(false)
+            terminalRef.current?.focus()
+          }}
+        />
+      )}
       {attachmentNotice && (
         <div className="rp-attachment" role="status">
           {attachmentNotice.src ? (

@@ -30,6 +30,14 @@ const WORKSPACE_FILTERS: { id: WorkspaceFilterId; label: string }[] = [
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico', '.avif']
 
+// Max file rows materialised into the workspace tree. High enough that every
+// sibling repo in a multi-repo folder gets its scanned files (the tree collapses
+// folders, so unexpanded rows aren't actually rendered).
+const MAX_TREE_FILES = 600
+// Above this folder count a project is treated as "large" (e.g. a folder of many
+// repos) and its tree starts collapsed, so it reads like a file explorer.
+const COLLAPSE_THRESHOLD = 12
+
 function fileExt(file: WorkspaceFile): string {
   return (file.extension || file.name.match(/\.[^.]+$/)?.[0] || '').toLowerCase()
 }
@@ -110,27 +118,42 @@ function toFileTree(node: MutableFileTreeNode): FileTreeNode {
   }
 }
 
-function buildFileTree(files: WorkspaceFile[]): FileTreeNode {
+/** Walk/create the folder-node chain for `parts`, returning the deepest node. */
+function ensureFolderPath(
+  root: MutableFileTreeNode,
+  parts: string[],
+  countFile: boolean
+): MutableFileTreeNode {
+  let cursor = root
+  let currentPath = ''
+  for (const part of parts) {
+    currentPath = currentPath ? `${currentPath}/${part}` : part
+    const existing = cursor.folders.get(part)
+    const next =
+      existing ?? { name: part, path: currentPath, folders: new Map(), files: [], fileCount: 0 }
+    if (countFile) next.fileCount += 1
+    cursor.folders.set(part, next)
+    cursor = next
+  }
+  return cursor
+}
+
+function buildFileTree(files: WorkspaceFile[], folders: string[] = []): FileTreeNode {
   const root: MutableFileTreeNode = { name: 'Root', path: 'Root', folders: new Map(), files: [], fileCount: 0 }
+
+  // Seed every known directory first so nested folders — including sibling repos
+  // whose files fall outside the scan/display cap — still appear in the tree.
+  for (const folder of folders) {
+    const parts = folder.split(/[\\/]/).filter(Boolean)
+    if (parts.length > 0) ensureFolderPath(root, parts, false)
+  }
 
   for (const file of files) {
     const parts = file.relativePath.split(/[\\/]/).filter(Boolean)
     parts.pop()
 
     root.fileCount += 1
-    let cursor = root
-    let currentPath = ''
-
-    for (const part of parts) {
-      currentPath = currentPath ? `${currentPath}/${part}` : part
-      const existing = cursor.folders.get(part)
-      const next =
-        existing ?? { name: part, path: currentPath, folders: new Map(), files: [], fileCount: 0 }
-      next.fileCount += 1
-      cursor.folders.set(part, next)
-      cursor = next
-    }
-
+    const cursor = ensureFolderPath(root, parts, true)
     cursor.files.push(file)
   }
 
@@ -218,6 +241,8 @@ export default function Sidebar(): JSX.Element {
   const toggleAutomations = useStore((s) => s.toggleAutomations)
   const historyOpen = useStore((s) => s.historyOpen)
   const toggleHistory = useStore((s) => s.toggleHistory)
+  const simulatorsOpen = useStore((s) => s.simulatorsOpen)
+  const toggleSimulators = useStore((s) => s.toggleSimulators)
   const mobileOpen = useStore((s) => s.mobileOpen)
   const toggleMobile = useStore((s) => s.toggleMobile)
   const profile = useStore((s) => s.profile)
@@ -227,6 +252,7 @@ export default function Sidebar(): JSX.Element {
   const recentProjects = useStore((s) => s.recentProjects)
   const openWorkspace = useStore((s) => s.openWorkspace)
   const openProject = useStore((s) => s.openProject)
+  const browseProject = useStore((s) => s.browseProject)
   const removeRecentProject = useStore((s) => s.removeRecentProject)
   const openWorkspaceFile = useStore((s) => s.openWorkspaceFile)
   const createWorkspaceFile = useStore((s) => s.createWorkspaceFile)
@@ -247,7 +273,10 @@ export default function Sidebar(): JSX.Element {
   const filteredFiles = workspace
     ? workspace.files.filter((file) => matchesWorkspaceFilter(file, workspaceFilter))
     : []
-  const fileTree = workspace ? buildFileTree(filteredFiles.slice(0, 120)) : undefined
+  // Only surface folders when not filtering, so a filter ("Code", "Images", …)
+  // narrows the tree to matching files instead of showing every empty folder.
+  const treeFolders = workspace && workspaceFilter === 'all' ? workspace.folders ?? [] : []
+  const fileTree = workspace ? buildFileTree(filteredFiles.slice(0, MAX_TREE_FILES), treeFolders) : undefined
   const menuFolder = folderMenu && fileTree ? findFolder(fileTree, folderMenu.folder) : undefined
   const activeFilterLabel =
     WORKSPACE_FILTERS.find((filter) => filter.id === workspaceFilter)?.label ?? 'All'
@@ -267,6 +296,20 @@ export default function Sidebar(): JSX.Element {
       window.removeEventListener('keydown', closeAll)
     }
   }, [folderMenu, fileMenu, workspaceMenu, filterMenu])
+
+  // When a project opens, start a large/multi-repo tree collapsed so the user
+  // sees a tidy list of folders to expand (like the OS folder picker) rather
+  // than one giant pre-expanded dump. Small projects stay fully expanded.
+  useEffect(() => {
+    if (!workspace || workspace.kind !== 'project') {
+      setCollapsedFolders(new Set())
+      return
+    }
+    const folders = workspace.folders ?? []
+    setCollapsedFolders(folders.length > COLLAPSE_THRESHOLD ? new Set(folders) : new Set())
+    // Re-run only when the open project changes, not on every files refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace?.path, workspace?.kind])
 
   useEffect(() => {
     window.localStorage.setItem('gennal:system-overview-hidden', String(systemOverviewHidden))
@@ -307,7 +350,10 @@ export default function Sidebar(): JSX.Element {
 
   const pickWorkspace = (kind: 'file' | 'project'): void => {
     setAddProjectOpen(false)
-    void openWorkspace(kind)
+    // Project picks go through the repo-detection flow (which may open the
+    // "import repositories" dialog); files keep the direct open path.
+    if (kind === 'project') void browseProject()
+    else void openWorkspace('file')
   }
 
   const requestNewWindow = (): void => {
@@ -324,7 +370,7 @@ export default function Sidebar(): JSX.Element {
     if (branchUrl) {
       window.open(branchUrl, '_blank', 'noopener,noreferrer')
     } else {
-      void openWorkspace('project')
+      void browseProject()
     }
   }
 
@@ -449,6 +495,23 @@ export default function Sidebar(): JSX.Element {
             </svg>
           </span>
           <span className="nav-label">History</span>
+        </button>
+        <button
+          className={`side-nav-item ${simulatorsOpen ? 'active' : ''}`}
+          title="Mobile Simulators — boot Android / iOS devices"
+          onClick={() => {
+            setActiveNav(null)
+            toggleSimulators(true)
+          }}
+        >
+          <span className="nav-ico" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2.5" y="3" width="7" height="10" rx="1.3" />
+              <rect x="9.5" y="5.5" width="4" height="7.5" rx="1.1" />
+              <path d="M5 11h2" />
+            </svg>
+          </span>
+          <span className="nav-label">Simulators</span>
         </button>
         <button
           className={`side-nav-item ${mobileOpen ? 'active' : ''}`}
@@ -763,10 +826,10 @@ export default function Sidebar(): JSX.Element {
               {filteredFiles.length === 0 && (
                 <div className="file-more">No files match this filter</div>
               )}
-              {filteredFiles.length > 120 && (
+              {filteredFiles.length > MAX_TREE_FILES && (
                 <div className="file-more file-more-count">
                   <span className="file-more-dots" aria-hidden="true" />
-                  +{filteredFiles.length - 120} more files
+                  +{filteredFiles.length - MAX_TREE_FILES} more files
                 </div>
               )}
             </div>

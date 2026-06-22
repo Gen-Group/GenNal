@@ -11,8 +11,10 @@ import {
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { SearchAddon } from '@xterm/addon-search'
 import { useStore, scrollbackLines, type Session } from '../store'
 import { createUrlScanner } from '../url-scanner'
+import TerminalFindBar from './TerminalFindBar'
 
 function isTerminalReport(data: string): boolean {
   return /^\x1b\[\?1;2c$/.test(data) || /^\x1b\[\?6c$/.test(data) || /^\x1b\[\d+;\d+R$/.test(data)
@@ -88,6 +90,8 @@ export default function ModelPane({
   const paneRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
+  const searchRef = useRef<SearchAddon | null>(null)
+  const [findOpen, setFindOpen] = useState(false)
   const noticeTimerRef = useRef<number | null>(null)
   // The terminal effect (keyed by session.id) needs a stable hook into the
   // latest paste handler, and a guard so a single Ctrl+V isn't pasted twice when
@@ -136,6 +140,10 @@ export default function ModelPane({
     const fit = new FitAddon()
     term.loadAddon(fit)
 
+    const search = new SearchAddon()
+    term.loadAddon(search)
+    searchRef.current = search
+
     // Detect URLs in the output: underline them on hover, open them in the
     // in-app website preview on click, and remember the hovered one so a
     // right-click (below) can open it too.
@@ -174,11 +182,16 @@ export default function ModelPane({
       const mod = window.api.isMac ? event.metaKey : event.ctrlKey
       const isC = event.key === 'c' || event.key === 'C'
       const isV = event.key === 'v' || event.key === 'V'
+      const isF = event.key === 'f' || event.key === 'F'
       if (mod && isC && (event.shiftKey || term.hasSelection())) {
         if (copySelection()) return false
       }
       if (mod && isV) {
         pasteRef.current()
+        return false
+      }
+      if (mod && isF && !event.shiftKey && !event.altKey) {
+        setFindOpen(true)
         return false
       }
       return true
@@ -234,6 +247,7 @@ export default function ModelPane({
       window.api.ptyKill(id)
       term.dispose()
       terminalRef.current = null
+      searchRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id])
@@ -312,7 +326,7 @@ export default function ModelPane({
 
   const attachClipboardImage = async (): Promise<void> => {
     try {
-      const attachment = await window.api.saveClipboardImage()
+      const attachment = await window.api.saveClipboardImage(session.projectPath)
       if (!attachment) return
       insertAttachmentPath(attachment.path)
       showAttachmentNotice({ name: attachment.name, src: attachment.dataUrl })
@@ -473,7 +487,18 @@ export default function ModelPane({
           </button>
         </span>
       </div>
-      <div className="pane-term" ref={termRef} onMouseDown={focusPane} />
+      <div className="pane-term" ref={termRef} onMouseDown={focusPane}>
+        {findOpen && searchRef.current && (
+          <TerminalFindBar
+            search={searchRef.current}
+            onClose={() => {
+              searchRef.current?.clearDecorations()
+              setFindOpen(false)
+              terminalRef.current?.focus()
+            }}
+          />
+        )}
+      </div>
       {attachmentNotice && (
         <div className="pane-attachment" role="status">
           {attachmentNotice.src ? (

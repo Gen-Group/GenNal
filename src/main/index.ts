@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, protocol, clipboard, Menu } from 'electron'
-import { promises as fs } from 'fs'
+import { promises as fs, type Dirent } from 'fs'
+import { createHash } from 'crypto'
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve } from 'path'
 import { loadModels, saveModels } from './model-registry'
 import { readCliUsage } from './usage-reader'
@@ -15,6 +16,7 @@ import { startStats, stopStats } from './stats-service'
 import { startRun, stopRun } from './run-manager'
 import { startChat, cancelChat, cancelAllChats } from './chat-manager'
 import { fetchGithubWork } from './github-service'
+import { listEmulators } from './emulator-manager'
 import {
   startMobileBridge,
   stopMobileBridge,
@@ -24,6 +26,7 @@ import {
 import type {
   AttachmentSaveResult,
   ChatSendPayload,
+  FolderScanResult,
   GithubFetchPayload,
   MobileContext,
   ModelDef,
@@ -97,7 +100,8 @@ function registerAppProtocol(): void {
 }
 
 const PREVIEW_LIMIT = 180_000
-const MAX_PROJECT_FILES = 400
+const MAX_PROJECT_FILES = 800
+const MAX_PROJECT_DIRS = 800
 const SKIP_DIRS = new Set([
   '.dart_tool',
   '.git',
@@ -192,6 +196,26 @@ const IMAGE_MIME = new Map<string, string>([
   ['.ico', 'image/x-icon'],
   ['.avif', 'image/avif']
 ])
+// Known binary extensions that should NOT be opened in the text editor. Anything
+// not on this list is treated as previewable text (including extensionless and
+// dotfiles like `.env`, `.gitignore`, `.prettierrc`, plus logs and other config).
+// A NUL-byte sniff in readPreview() catches binaries with unlisted extensions.
+const BINARY_EXTS = new Set([
+  // images
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.avif', '.icns', '.tif', '.tiff',
+  // audio / video
+  '.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.mp4', '.mov', '.avi', '.mkv', '.webm', '.wmv', '.flv',
+  // archives
+  '.zip', '.tar', '.gz', '.tgz', '.bz2', '.xz', '.7z', '.rar', '.jar', '.war',
+  // fonts
+  '.ttf', '.otf', '.woff', '.woff2', '.eot',
+  // executables / libraries / compiled artifacts
+  '.exe', '.dll', '.so', '.dylib', '.bin', '.o', '.a', '.class', '.wasm', '.node', '.pdb',
+  // documents / binary data stores
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.sqlite', '.db', '.dat',
+  // disk images / installable packages
+  '.dmg', '.iso', '.apk', '.aab', '.ipa', '.deb', '.rpm', '.msi'
+])
 const IMAGE_PREVIEW_LIMIT = 25 * 1024 * 1024 // 25 MB
 const ATTACHMENT_LIMIT = 25 * 1024 * 1024 // 25 MB
 
@@ -208,7 +232,7 @@ function toWorkspaceFile(path: string, root?: string, size = 0): WorkspaceFile {
 }
 
 function canPreview(path: string): boolean {
-  return basename(path) === 'CMakeLists.txt' || TEXT_EXTS.has(extname(path).toLowerCase())
+  return !BINARY_EXTS.has(extname(path).toLowerCase())
 }
 
 function githubBranchUrl(remoteUrl: string, branch: string): string | undefined {
@@ -257,6 +281,11 @@ async function readPreview(file: WorkspaceFile): Promise<WorkspaceReadResult> {
     const size = Math.min(file.size, PREVIEW_LIMIT)
     const buffer = Buffer.alloc(size)
     await handle.read(buffer, 0, size, 0)
+    // A NUL byte in the first chunk reliably marks a binary file whose extension
+    // wasn't on the binary list — show the placeholder instead of garbled bytes.
+    if (buffer.includes(0)) {
+      return { file, content: 'Binary or unsupported file type. Choose a source file to preview it here.', truncated: false }
+    }
     return {
       file,
       content: buffer.toString('utf8'),
@@ -267,31 +296,129 @@ async function readPreview(file: WorkspaceFile): Promise<WorkspaceReadResult> {
   }
 }
 
-async function listProjectFiles(root: string): Promise<WorkspaceFile[]> {
-  const files: WorkspaceFile[] = []
+interface ProjectListing {
+  files: WorkspaceFile[]
+  folders: string[]
+}
 
-  async function walk(dir: string): Promise<void> {
-    if (files.length >= MAX_PROJECT_FILES) return
-    const entries = await fs.readdir(dir, { withFileTypes: true })
+/**
+ * Scan a project breadth-first so sibling folders (e.g. separate repos inside a
+ * "folder with many repos") are always discovered before the file-count cap is
+ * spent inside one deep branch. Directories are collected separately from files
+ * so the tree can show every nested folder even when its files weren't scanned.
+ */
+async function listProjectFiles(root: string): Promise<ProjectListing> {
+  const files: WorkspaceFile[] = []
+  const folders: string[] = []
+  const queue: string[] = [root]
+
+  while (queue.length > 0) {
+    const dir = queue.shift() as string
+    let entries: Dirent[]
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true })
+    } catch {
+      continue // unreadable directory (permissions, vanished) — skip it
+    }
+
     for (const entry of entries) {
-      if (files.length >= MAX_PROJECT_FILES) return
       const fullPath = join(dir, entry.name)
       if (entry.isDirectory()) {
-        if (!SKIP_DIRS.has(entry.name)) await walk(fullPath)
+        if (SKIP_DIRS.has(entry.name)) continue
+        if (folders.length < MAX_PROJECT_DIRS) {
+          folders.push(relative(root, fullPath).split('\\').join('/'))
+          queue.push(fullPath)
+        }
         continue
       }
       if (!entry.isFile()) continue
+      if (files.length >= MAX_PROJECT_FILES) continue
       const stat = await fs.stat(fullPath)
       files.push(toWorkspaceFile(fullPath, root, stat.size))
     }
   }
 
-  await walk(root)
-  return files.sort((a, b) => {
+  files.sort((a, b) => {
     const aCode = CODE_EXTS.has(a.extension) ? 0 : 1
     const bCode = CODE_EXTS.has(b.extension) ? 0 : 1
     return aCode - bCode || a.relativePath.localeCompare(b.relativePath)
   })
+  folders.sort((a, b) => a.localeCompare(b))
+  return { files, folders }
+}
+
+/** Files that mark a directory as a buildable project even without a .git. */
+const PROJECT_MARKERS = new Set([
+  'package.json',
+  'pubspec.yaml',
+  'pom.xml',
+  'build.gradle',
+  'build.gradle.kts',
+  'settings.gradle',
+  'Cargo.toml',
+  'go.mod',
+  'requirements.txt',
+  'pyproject.toml',
+  'composer.json',
+  'Gemfile',
+  'CMakeLists.txt',
+  'Makefile'
+])
+
+/** True when `dir` is a git repo (`.git` may be a directory or a file). */
+async function isGitRepo(dir: string): Promise<boolean> {
+  try {
+    await fs.stat(join(dir, '.git'))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** True when `dir` contains a recognised project manifest. */
+async function looksLikeProject(dir: string): Promise<boolean> {
+  try {
+    const entries = await fs.readdir(dir)
+    return entries.some(
+      (name) => PROJECT_MARKERS.has(name) || name.endsWith('.csproj') || name.endsWith('.sln')
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Inspect a folder's immediate children to decide how to import it: whether the
+ * folder is itself a repo, and which child folders look like separate repos or
+ * projects (a "folder of many repos").
+ */
+async function detectRepos(root: string): Promise<FolderScanResult> {
+  const result: FolderScanResult = {
+    path: root,
+    name: basename(root),
+    isRepo: await isGitRepo(root),
+    repos: []
+  }
+
+  let entries: Dirent[] = []
+  try {
+    entries = await fs.readdir(root, { withFileTypes: true })
+  } catch {
+    return result
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue
+    const childPath = join(root, entry.name)
+    const repo = await isGitRepo(childPath)
+    if (repo || (await looksLikeProject(childPath))) {
+      result.repos.push({ name: entry.name, path: childPath, isRepo: repo })
+    }
+  }
+
+  result.repos.sort((a, b) => a.name.localeCompare(b.name))
+  return result
 }
 
 async function openWorkspacePath(payload: WorkspaceOpenPathPayload): Promise<WorkspaceOpenResult> {
@@ -315,7 +442,7 @@ async function openWorkspacePath(payload: WorkspaceOpenPathPayload): Promise<Wor
 
   if (!stat.isDirectory()) throw new Error('Saved workspace folder is no longer available.')
 
-  const files = await listProjectFiles(payload.path)
+  const { files, folders } = await listProjectFiles(payload.path)
   const git = await readGitInfo(payload.path)
   const selectedFile =
     files.find((file) => file.path === payload.selectedFilePath) ??
@@ -327,6 +454,7 @@ async function openWorkspacePath(payload: WorkspaceOpenPathPayload): Promise<Wor
     path: payload.path,
     name: basename(payload.path),
     files,
+    folders,
     git,
     selectedFile,
     content: preview?.content,
@@ -374,7 +502,20 @@ async function readImageAttachment(path: string): Promise<AttachmentSaveResult> 
   }
 }
 
-async function saveClipboardImage(): Promise<AttachmentSaveResult | null> {
+// Group saved attachments under a per-project subfolder so the global
+// attachments directory doesn't accumulate every project's images in one flat
+// pile. The basename keeps the folder recognizable; a short hash of the full
+// path disambiguates two projects that share a basename. Path-less calls (no
+// active project) fall back to a shared bucket.
+function projectAttachmentDir(projectPath?: string): string {
+  const root = join(app.getPath('userData'), 'attachments')
+  if (!projectPath) return join(root, '_shared')
+  const slug = basename(projectPath).replace(/[^a-zA-Z0-9._-]+/g, '-') || 'project'
+  const hash = createHash('sha1').update(projectPath).digest('hex').slice(0, 8)
+  return join(root, `${slug}-${hash}`)
+}
+
+async function saveClipboardImage(projectPath?: string): Promise<AttachmentSaveResult | null> {
   const image = clipboard.readImage()
   if (image.isEmpty()) return null
 
@@ -383,7 +524,7 @@ async function saveClipboardImage(): Promise<AttachmentSaveResult | null> {
     throw new Error('Clipboard image is too large to attach (over 25 MB).')
   }
 
-  const attachmentDir = join(app.getPath('userData'), 'attachments')
+  const attachmentDir = projectAttachmentDir(projectPath)
   await fs.mkdir(attachmentDir, { recursive: true })
   const name = `clipboard-${timestampSlug()}.png`
   const path = join(attachmentDir, name)
@@ -493,6 +634,11 @@ function registerIpc(): void {
 
   ipcMain.handle('github:fetch', (_e, payload: GithubFetchPayload) => fetchGithubWork(payload))
 
+  // Discover Android AVDs / iOS Simulators installed on this machine. Booting
+  // one runs its launch command in a normal terminal pane (the emulator opens
+  // its own OS window), so no extra process bookkeeping lives in main.
+  ipcMain.handle('emulators:list', () => listEmulators())
+
   ipcMain.handle('workspace:open', async (_e, kind: WorkspaceKind): Promise<WorkspaceOpenResult | null> => {
     const options = {
       title: kind === 'project' ? 'Open project folder' : 'Open code file',
@@ -516,6 +662,26 @@ function registerIpc(): void {
 
   ipcMain.handle('workspace:open-path', async (_e, payload: WorkspaceOpenPathPayload): Promise<WorkspaceOpenResult> => {
     return openWorkspacePath(payload)
+  })
+
+  // Pick a project folder and report which child folders look like separate
+  // repos/projects, so the renderer can offer "import separately vs monorepo".
+  ipcMain.handle('workspace:pick-folder', async (): Promise<FolderScanResult | null> => {
+    const options = {
+      title: 'Open project folder',
+      properties: ['openDirectory']
+    } satisfies Electron.OpenDialogOptions
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+
+    if (result.canceled || result.filePaths.length === 0) return null
+    return detectRepos(result.filePaths[0])
+  })
+
+  // Scan an already-known folder path (e.g. re-importing from a recent entry).
+  ipcMain.handle('workspace:scan-folder', async (_e, path: string): Promise<FolderScanResult> => {
+    return detectRepos(path)
   })
 
   ipcMain.handle('workspace:read-file', async (_e, file: WorkspaceFile): Promise<WorkspaceReadResult> => {
@@ -573,9 +739,12 @@ function registerIpc(): void {
     })
   })
 
-  ipcMain.handle('attachments:save-clipboard-image', async (): Promise<AttachmentSaveResult | null> => {
-    return saveClipboardImage()
-  })
+  ipcMain.handle(
+    'attachments:save-clipboard-image',
+    async (_e, projectPath?: string): Promise<AttachmentSaveResult | null> => {
+      return saveClipboardImage(projectPath)
+    }
+  )
 
   ipcMain.handle('attachments:pick-images', async (): Promise<AttachmentSaveResult[]> => {
     const options = {

@@ -515,7 +515,7 @@ export default function ChatPanel({ active = true }: { active?: boolean }): JSX.
     if (!hasClipboardImage) return
     e.preventDefault()
     void window.api
-      .saveClipboardImage()
+      .saveClipboardImage(workspace?.kind === 'project' ? workspace.path : undefined)
       .then((att) => {
         if (att) addAttachments([att])
         else setNotice('Could not read the pasted image from the clipboard.')

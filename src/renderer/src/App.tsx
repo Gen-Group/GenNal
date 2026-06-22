@@ -8,6 +8,7 @@ import BrowserPreview from './components/BrowserPreview'
 import TasksPanel from './components/TasksPanel'
 import AutomationsPanel from './components/AutomationsPanel'
 import SessionHistoryPanel from './components/SessionHistoryPanel'
+import SimulatorsPanel from './components/SimulatorsPanel'
 import RightPanel from './components/RightPanel'
 import StatusBar from './components/StatusBar'
 import CommandPalette from './components/CommandPalette'
@@ -16,6 +17,7 @@ import ProfileDialog from './components/ProfileDialog'
 import AddModelDialog from './components/AddModelDialog'
 import MobileDialog from './components/MobileDialog'
 import ImagePreview from './components/ImagePreview'
+import ImportReposDialog from './components/ImportReposDialog'
 
 export default function App(): JSX.Element {
   const setModels = useStore((s) => s.setModels)
@@ -33,6 +35,7 @@ export default function App(): JSX.Element {
   const tasksOpen = useStore((s) => s.tasksOpen)
   const automationsOpen = useStore((s) => s.automationsOpen)
   const historyOpen = useStore((s) => s.historyOpen)
+  const simulatorsOpen = useStore((s) => s.simulatorsOpen)
   const previewCenter = useStore((s) => s.previewCenter)
   const tickAutomations = useStore((s) => s.tickAutomations)
   const bodyClasses = [
@@ -117,6 +120,8 @@ export default function App(): JSX.Element {
             <AutomationsPanel />
           ) : historyOpen ? (
             <SessionHistoryPanel />
+          ) : simulatorsOpen ? (
+            <SimulatorsPanel />
           ) : (
             <>
               <LayoutToolbar />
@@ -133,6 +138,7 @@ export default function App(): JSX.Element {
       <AddModelDialog />
       <MobileDialog />
       <ImagePreview />
+      <ImportReposDialog />
     </div>
   )
 }

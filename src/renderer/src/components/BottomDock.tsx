@@ -7,12 +7,13 @@ export default function BottomDock(): JSX.Element {
   const setGrid = useStore((s) => s.setGrid)
   const setMode = useStore((s) => s.setMode)
   const openWorkspace = useStore((s) => s.openWorkspace)
+  const browseProject = useStore((s) => s.browseProject)
 
   return (
     <div className="dock">
       <ModelMenu label="New Session" variant="ghost" />
       <button className="dock-btn" onClick={() => void openWorkspace('file')}>Upload File</button>
-      <button className="dock-btn" onClick={() => void openWorkspace('project')}>Upload Project</button>
+      <button className="dock-btn" onClick={() => void browseProject()}>Upload Project</button>
       <button className="dock-btn" onClick={() => setMode('stack')}>Split H</button>
       <button className="dock-btn" onClick={() => setMode('grid')}>Split V</button>
       <button className="dock-btn" onClick={() => activeId && removeSession(activeId)}>Close</button>
