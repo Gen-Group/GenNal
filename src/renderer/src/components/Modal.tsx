@@ -28,6 +28,15 @@ export default function Modal({
 }: ModalProps): JSX.Element {
   const overlayRef = useRef<HTMLDivElement>(null)
 
+  // Keep the latest callback/flag in refs so the focus-trap effect can stay
+  // mount-only. Without this, a consumer passing an inline `onClose` would
+  // re-run the effect on every render — re-focusing the first control and
+  // yanking a scrolled panel back to the top.
+  const onCloseRef = useRef(onClose)
+  const dismissableRef = useRef(dismissable)
+  onCloseRef.current = onClose
+  dismissableRef.current = dismissable
+
   useEffect(() => {
     const overlay = overlayRef.current
     const prevFocus = document.activeElement as HTMLElement | null
@@ -45,9 +54,9 @@ export default function Modal({
     }
 
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && dismissable) {
+      if (e.key === 'Escape' && dismissableRef.current) {
         e.stopPropagation()
-        onClose()
+        onCloseRef.current()
         return
       }
       if (e.key === 'Tab') {
@@ -73,7 +82,8 @@ export default function Modal({
       // Restore focus to the trigger so keyboard users aren't dropped at <body>.
       prevFocus?.focus?.()
     }
-  }, [onClose, dismissable])
+    // Mount-only: refs above keep onClose/dismissable current without re-running.
+  }, [])
 
   const onOverlayMouseDown = (e: ReactMouseEvent): void => {
     if (e.target === overlayRef.current && dismissable) onClose()
