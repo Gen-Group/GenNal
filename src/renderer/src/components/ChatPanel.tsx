@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type ClipboardEvent as ReactClipboardEvent,
+  type CSSProperties,
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent
 } from 'react'
@@ -206,6 +207,7 @@ export default function ChatPanel({ active = true }: { active?: boolean }): JSX.
   const models = useStore((s) => s.models)
   const applyCode = useStore((s) => s.applyCode)
   const workspace = useStore((s) => s.workspace)
+  const prompt = useStore((s) => s.prompt)
   const addChatHistoryEntry = useStore((s) => s.addChatHistoryEntry)
   const chatHistory = useStore((s) => s.chatHistory)
   const clearChatHistory = useStore((s) => s.clearChatHistory)
@@ -602,7 +604,12 @@ export default function ChatPanel({ active = true }: { active?: boolean }): JSX.
   const approve = async (code: string): Promise<void> => {
     let suggestedName: string | undefined
     if (!workspace?.selectedFile && workspace?.kind === 'project') {
-      const name = window.prompt('Save this code as (path inside the project):')
+      const name = await prompt({
+        title: 'Save code to file',
+        label: 'Path inside the project',
+        placeholder: 'src/example.ts',
+        confirmLabel: 'Save'
+      })
       if (!name?.trim()) return
       suggestedName = name.trim()
     }
@@ -615,6 +622,7 @@ export default function ChatPanel({ active = true }: { active?: boolean }): JSX.
   return (
     <div
       className={`chatpanel${active ? '' : ' hidden'}${dragActive ? ' dragging' : ''}`}
+      style={{ '--pane-accent': accent } as CSSProperties}
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}

@@ -1,13 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import QRCode from 'qrcode'
 import { useStore } from '../store'
+import Modal from './Modal'
 import type { MobileStatus } from '../../../shared/types'
 
 export default function MobileDialog(): JSX.Element | null {
   const open = useStore((s) => s.mobileOpen)
   const toggleMobile = useStore((s) => s.toggleMobile)
-  const workspace = useStore((s) => s.workspace)
-  const sessions = useStore((s) => s.sessions)
 
   const [status, setStatus] = useState<MobileStatus | null>(null)
   const [qr, setQr] = useState('')
@@ -16,12 +15,9 @@ export default function MobileDialog(): JSX.Element | null {
   // Which LAN address the QR currently points at. The server listens on every
   // interface, so switching this just re-encodes the QR — no restart needed.
   const [activeHost, setActiveHost] = useState<string | null>(null)
-  // Track the latest "open" so an async start that resolves after the dialog was
-  // closed doesn't leave the server running.
-  const openRef = useRef(open)
-  openRef.current = open
-
-  // Start the bridge when the dialog opens; stop it when it closes.
+  // Start the bridge when the dialog opens. The server keeps running after the
+  // dialog closes so Settings → Mobile can show connected devices; it's stopped
+  // explicitly from there ("Stop sharing") or when the app quits.
   useEffect(() => {
     if (!open) return
     let cancelled = false
@@ -30,10 +26,7 @@ export default function MobileDialog(): JSX.Element | null {
     void window.api.mobile
       .start()
       .then((s) => {
-        if (cancelled || !openRef.current) {
-          if (s.running) void window.api.mobile.stop()
-          return
-        }
+        if (cancelled) return
         setStatus(s)
         setActiveHost(s.host ?? null)
         setStarting(false)
@@ -46,7 +39,6 @@ export default function MobileDialog(): JSX.Element | null {
       })
     return () => {
       cancelled = true
-      void window.api.mobile.stop()
       setStatus(null)
       setActiveHost(null)
       setQr('')
@@ -77,14 +69,21 @@ export default function MobileDialog(): JSX.Element | null {
     }
   }, [status?.running, activeHost, port, token])
 
-  // Keep the bridge's view of the open project + terminals current while paired.
+  // Poll the bridge while paired so connected phones (and their names) show up
+  // under the QR as soon as they scan it.
   useEffect(() => {
     if (!open || !status?.running) return
-    window.api.mobile.setContext({
-      cwd: workspace?.kind === 'project' ? workspace.path : undefined,
-      panes: sessions.map((s) => ({ id: s.id, label: s.label, tag: s.tag }))
-    })
-  }, [open, status?.running, workspace, sessions])
+    let cancelled = false
+    const timer = window.setInterval(() => {
+      void window.api.mobile.status().then((s) => {
+        if (!cancelled) setStatus((prev) => (prev ? { ...prev, devices: s.devices } : prev))
+      })
+    }, 1500)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [open, status?.running])
 
   if (!open) return null
 
@@ -94,6 +93,7 @@ export default function MobileDialog(): JSX.Element | null {
     host && port && token ? `http://${host}:${port}/?t=${token}` : status?.url
   const currentDisplayUrl = host && port ? `http://${host}:${port}` : status?.displayUrl
   const addresses = status?.addresses ?? []
+  const devices = status?.devices ?? []
   const copyUrl = (): void => {
     if (!currentUrl) return
     window.api.writeClipboardText(currentUrl)
@@ -102,13 +102,12 @@ export default function MobileDialog(): JSX.Element | null {
   }
 
   return (
-    <div className="mobile-overlay" onMouseDown={close}>
+    <Modal onClose={close}>
       <div
         className="mobile-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="mobile-title"
-        onMouseDown={(e) => e.stopPropagation()}
       >
         <button className="mobile-close" aria-label="Close" onClick={close}>
           <svg viewBox="0 0 14 14" width="13" height="13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
@@ -175,15 +174,36 @@ export default function MobileDialog(): JSX.Element | null {
               </div>
             )}
 
+            <div className="mobile-devices">
+              <span className="mobile-devices-label">
+                {devices.length > 0
+                  ? `Connected ${devices.length === 1 ? 'device' : 'devices'} (${devices.length})`
+                  : 'No device connected yet'}
+              </span>
+              {devices.length === 0 ? (
+                <p className="mobile-devices-empty">A device appears here the moment it scans the code.</p>
+              ) : (
+                <div className="mobile-devices-list">
+                  {devices.map((d) => (
+                    <div className="mobile-device" key={d.id}>
+                      <span className="mobile-device-dot" aria-hidden="true" />
+                      <span className="mobile-device-name">{d.name}</span>
+                      <span className="mobile-device-ip">{d.ip}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="mobile-note">
               <span className="mobile-lock" aria-hidden="true">🔒</span>
               The link carries a one-time pairing token, so only a device that scans this code can connect.
-              The connection runs commands on this computer — only pair devices you trust, and the server
-              stops the moment you close this window.
+              The connection runs commands on this computer — only pair devices you trust. Sharing keeps
+              running after you close this window; stop it any time from Settings → Mobile.
             </div>
           </>
         )}
       </div>
-    </div>
+    </Modal>
   )
 }

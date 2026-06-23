@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useStore, type NotificationSound, type PanelSide, type ThemeName } from '../store'
+import { playNotificationSound } from '../notification-sound'
 import type { MobileStatus } from '../../../shared/types'
 import UsageDetail from './UsageDetail'
+import ProjectSettingsPanel from './ProjectSettingsPanel'
+import ProvidersUsage from './ProvidersUsage'
+import Modal from './Modal'
+import { accentForPath as projectAccent } from '../accents'
 
 const THEME_OPTIONS: { id: ThemeName; label: string; hint: string }[] = [
   { id: 'dark', label: 'Dark', hint: 'Dark cockpit theme is active.' },
@@ -176,21 +181,13 @@ type SettingsKey =
   | 'ssh'
   | 'mobile'
   | 'privacy'
+  | 'project'
 
 interface SettingsItem {
   id: SettingsKey
   label: string
   icon: string
   badge?: string
-}
-
-const PROJECT_ACCENTS = ['#7c5cff', '#2f8cff', '#22c55e', '#f97316', '#ec4899', '#14b8a6', '#a78bfa', '#f59e0b']
-
-/** Stable accent for a project's monogram, derived from its path. */
-function projectAccent(path: string): string {
-  let hash = 0
-  for (let i = 0; i < path.length; i++) hash = (hash * 31 + path.charCodeAt(i)) | 0
-  return PROJECT_ACCENTS[Math.abs(hash) % PROJECT_ACCENTS.length]
 }
 
 type TaskPriority = 'low' | 'normal' | 'high'
@@ -578,6 +575,7 @@ export default function SettingsPanel(): JSX.Element | null {
   const setTheme = useStore((s) => s.setTheme)
   const terminalSettings = useStore((s) => s.terminalSettings)
   const setTerminalSettings = useStore((s) => s.setTerminalSettings)
+  const prompt = useStore((s) => s.prompt)
   const removeSession = useStore((s) => s.removeSession)
   const privacySettings = useStore((s) => s.privacySettings)
   const setPrivacySettings = useStore((s) => s.setPrivacySettings)
@@ -601,11 +599,12 @@ export default function SettingsPanel(): JSX.Element | null {
   const workspace = useStore((s) => s.workspace)
   const openWorkspace = useStore((s) => s.openWorkspace)
   const browseProject = useStore((s) => s.browseProject)
-  const openProject = useStore((s) => s.openProject)
   const recentProjects = useStore((s) => s.recentProjects)
+  const projectSettings = useStore((s) => s.projectSettings)
   const clearWorkspace = useStore((s) => s.clearWorkspace)
   const toggleMobile = useStore((s) => s.toggleMobile)
   const [active, setActive] = useState<SettingsKey>('appearance')
+  const [projectPath, setProjectPath] = useState<string | null>(null)
   const [mobileStatus, setMobileStatus] = useState<MobileStatus | null>(null)
   const [mobileCopied, setMobileCopied] = useState(false)
   const [taskSettings, setTaskSettings] = useState<TaskSourceSettings>(loadTaskSourceSettings)
@@ -718,11 +717,15 @@ export default function SettingsPanel(): JSX.Element | null {
 
   const choosePanelSide = (side: PanelSide): void => setPanelSide(side)
   const mobileRunning = Boolean(mobileStatus?.running)
+  const mobileDevices = mobileStatus?.devices ?? []
   const copyMobileUrl = (): void => {
     if (!mobileStatus?.url) return
     window.api.writeClipboardText(mobileStatus.url)
     setMobileCopied(true)
     window.setTimeout(() => setMobileCopied(false), 1500)
+  }
+  const stopMobile = (): void => {
+    void window.api.mobile.stop().then((s) => setMobileStatus(s))
   }
   const activeGroup = GROUPS.find((group) => group.items.some((item) => item.id === active))
   const activeItem = activeGroup?.items.find((item) => item.id === active)
@@ -876,9 +879,12 @@ export default function SettingsPanel(): JSX.Element | null {
     }
     const show = (): void => {
       const sound = notificationSettings.sound
+      // Native notification audio is unreliable across platforms, so play the
+      // selected alert ourselves — the same sound an AI run completion fires.
+      playNotificationSound(sound)
       new Notification('GenNal', {
         body: 'This is a test notification.',
-        silent: sound === 'none'
+        silent: true
       })
       setNotificationTest('Test notification sent.')
     }
@@ -895,8 +901,13 @@ export default function SettingsPanel(): JSX.Element | null {
   }
 
   return (
-    <div className="settings-overlay" onMouseDown={() => toggleSettings(false)}>
-      <section className="settings-shell" onMouseDown={(event) => event.stopPropagation()}>
+    <Modal onClose={() => toggleSettings(false)}>
+      <section
+        className="settings-shell"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+      >
         <aside className="settings-nav">
           <div className="settings-nav-title">Settings</div>
           {GROUPS.map((group) => (
@@ -924,25 +935,29 @@ export default function SettingsPanel(): JSX.Element | null {
               <div className="settings-group-title">Projects</div>
               {recentProjects.map((project) => {
                 const isActive =
-                  workspace?.kind === 'project' &&
-                  workspace.path.toLowerCase() === project.path.toLowerCase()
+                  active === 'project' && projectPath?.toLowerCase() === project.path.toLowerCase()
+                const ps = projectSettings[project.path.toLowerCase()]
+                const label = ps?.displayName?.trim() || project.name
+                const accent = ps?.color ?? projectAccent(project.path)
                 return (
                   <button
                     key={project.path}
                     className={`settings-nav-item settings-project-item ${isActive ? 'active' : ''}`}
                     title={project.path}
                     onClick={() => {
-                      void openProject(project.path)
-                      toggleSettings(false)
+                      setActive('project')
+                      setProjectPath(project.path)
+                      setUsageDetailId(null)
                     }}
                   >
-                    <span
-                      className="settings-project-mono"
-                      style={{ background: projectAccent(project.path) }}
-                    >
-                      {project.name.trim().charAt(0).toUpperCase() || 'P'}
+                    <span className="settings-project-mono" style={{ background: accent }}>
+                      {ps?.iconMode === 'emoji' && ps.emoji
+                        ? ps.emoji
+                        : ps?.iconMode === 'avatar' && ps.image
+                          ? <img className="settings-project-img" src={ps.image} alt="" />
+                          : label.trim().charAt(0).toUpperCase() || 'P'}
                     </span>
-                    <span className="settings-project-name">{project.name}</span>
+                    <span className="settings-project-name">{label}</span>
                   </button>
                 )
               })}
@@ -951,6 +966,17 @@ export default function SettingsPanel(): JSX.Element | null {
         </aside>
 
         <main className="settings-main">
+          {active === 'project' && projectPath ? (
+            <ProjectSettingsPanel
+              path={projectPath}
+              onClose={() => toggleSettings(false)}
+              onDeleted={() => {
+                setActive('appearance')
+                setProjectPath(null)
+              }}
+            />
+          ) : (
+          <>
           <div className="settings-main-head">
             <div>
               <div className="settings-kicker">{activeGroup?.title ?? 'Settings'}</div>
@@ -1210,8 +1236,14 @@ export default function SettingsPanel(): JSX.Element | null {
                   ))}
                   <button
                     className={![10, 25, 50, 100, 250].includes(terminalSettings.scrollbackMB) ? 'active' : ''}
-                    onClick={() => {
-                      const v = window.prompt('Scrollback size in MB', String(terminalSettings.scrollbackMB))
+                    onClick={async () => {
+                      const v = await prompt({
+                        title: 'Custom scrollback',
+                        label: 'Buffer size in MB (1–2000)',
+                        initialValue: String(terminalSettings.scrollbackMB),
+                        confirmLabel: 'Set'
+                      })
+                      if (v === null) return
                       const n = Number(v)
                       if (Number.isFinite(n) && n > 0 && n <= 2000) setTerminalSettings({ scrollbackMB: n })
                     }}
@@ -1650,6 +1682,8 @@ export default function SettingsPanel(): JSX.Element | null {
                 />
               ) : (
               <>
+              <ProvidersUsage />
+
               <div className="settings-summary-grid">
                 <div className="settings-summary">
                   <span>AI connected</span>
@@ -1895,6 +1929,27 @@ export default function SettingsPanel(): JSX.Element | null {
                   disabled={!notificationSettings.enabled}
                   onClick={() =>
                     setNotificationSettings({ agentTaskComplete: !notificationSettings.agentTaskComplete })
+                  }
+                >
+                  <span />
+                </button>
+              </div>
+
+              <div className={`settings-card${notificationSettings.enabled ? '' : ' is-disabled'}`}>
+                <div>
+                  <h3 className="settings-card-title">
+                    <NavIcon name="play" />
+                    AI Run Sound Alert
+                  </h3>
+                  <p>Play a sound when an AI run finishes in a terminal pane.</p>
+                </div>
+                <button
+                  className={`task-toggle ${notificationSettings.runCompleteSound ? 'on' : ''}`}
+                  aria-pressed={notificationSettings.runCompleteSound}
+                  aria-label="AI Run Sound Alert"
+                  disabled={!notificationSettings.enabled}
+                  onClick={() =>
+                    setNotificationSettings({ runCompleteSound: !notificationSettings.runCompleteSound })
                   }
                 >
                   <span />
@@ -2208,7 +2263,13 @@ export default function SettingsPanel(): JSX.Element | null {
               <div className="settings-summary-grid">
                 <div className="settings-summary">
                   <span>Status</span>
-                  <strong>{mobileRunning ? 'Paired & online' : 'Off'}</strong>
+                  <strong>
+                    {mobileRunning
+                      ? mobileDevices.length > 0
+                        ? `${mobileDevices.length} device${mobileDevices.length === 1 ? '' : 's'}`
+                        : 'Online'
+                      : 'Off'}
+                  </strong>
                 </div>
                 <div className="settings-summary">
                   <span>Shared terminals</span>
@@ -2233,10 +2294,15 @@ export default function SettingsPanel(): JSX.Element | null {
                   <button className="remote-add-btn" type="button" onClick={() => toggleMobile(true)}>
                     {mobileRunning ? 'Show pairing code' : 'Pair a device'}
                   </button>
+                  {mobileRunning && (
+                    <button className="remote-add-btn stop" type="button" onClick={stopMobile}>
+                      Stop sharing
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {mobileRunning ? (
+              {mobileRunning && (
                 <div className="remote-card connected">
                   <span className="remote-status" />
                   <div className="remote-copy">
@@ -2252,16 +2318,36 @@ export default function SettingsPanel(): JSX.Element | null {
                     </button>
                   </div>
                 </div>
+              )}
+
+              {mobileDevices.length > 0 ? (
+                mobileDevices.map((device) => (
+                  <div className="remote-card connected" key={device.id}>
+                    <span className="remote-status" />
+                    <div className="remote-copy">
+                      <div className="remote-card-head">
+                        <h3>{device.name}</h3>
+                        <span>Connected</span>
+                      </div>
+                      <p>{device.ip}</p>
+                    </div>
+                  </div>
+                ))
               ) : (
                 <div className="settings-placeholder remote-empty">
-                  <h3>No device paired</h3>
-                  <p>Choose “Pair a device” to show a QR code your phone can scan.</p>
+                  <h3>{mobileRunning ? 'Waiting for a device…' : 'No device paired'}</h3>
+                  <p>
+                    {mobileRunning
+                      ? 'Scan the QR code with your phone. It will appear here by name once connected.'
+                      : 'Choose “Pair a device” to show a QR code your phone can scan.'}
+                  </p>
                 </div>
               )}
 
               <p className="remote-note">
                 The link carries a one-time pairing token, and the connection runs commands on this
-                computer — only pair devices you trust. Pairing stops the moment you close the QR window.
+                computer — only pair devices you trust. Sharing keeps running in the background until you
+                choose “Stop sharing” or quit GenNal.
               </p>
             </div>
           ) : (
@@ -2270,8 +2356,10 @@ export default function SettingsPanel(): JSX.Element | null {
               <p>This section is ready for configuration controls.</p>
             </div>
           )}
+          </>
+          )}
         </main>
       </section>
-    </div>
+    </Modal>
   )
 }

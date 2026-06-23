@@ -151,19 +151,15 @@ export default function AutomationsPanel(): JSX.Element {
         <section className="auto-detail">
           {!selected ? (
             <div className="auto-empty">
-              <div className="auto-tabs">
-                <button className="on">Overview</button>
-                <button className="muted">Runs 0</button>
-              </div>
               <div className="auto-empty-msg">Create an automation to start scheduling agent work.</div>
             </div>
           ) : (
             <>
-              <div className="auto-tabs">
-                <button className={tab === 'overview' ? 'on' : ''} onClick={() => setTab('overview')}>
+              <div className="auto-tabs" role="group" aria-label="Automation detail">
+                <button className={tab === 'overview' ? 'on' : ''} aria-pressed={tab === 'overview'} onClick={() => setTab('overview')}>
                   Overview
                 </button>
-                <button className={tab === 'runs' ? 'on' : ''} onClick={() => setTab('runs')}>
+                <button className={tab === 'runs' ? 'on' : ''} aria-pressed={tab === 'runs'} onClick={() => setTab('runs')}>
                   Runs <span className="auto-runs-count">{runs.length}</span>
                 </button>
               </div>

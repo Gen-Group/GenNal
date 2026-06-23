@@ -1,14 +1,20 @@
 import { homedir } from 'os'
 import { join } from 'path'
 import { readFile, readdir, stat } from 'fs/promises'
+import { createReadStream } from 'fs'
 import type { CliUsage, CliUsageAccount, CliUsageLimit, UsagePeriod } from '../shared/types'
 
 /**
  * Reads real usage data for each AI CLI straight from the files the tools
  * themselves write under the user's home directory. Everything here is
  * best-effort and read-only: any missing file or parse error degrades to a
- * partial result instead of throwing, and credential/token stores are never
- * read — only non-secret account metadata and local activity stats.
+ * partial result instead of throwing.
+ *
+ * One deliberate exception: to surface Claude's live plan-usage limits (which
+ * Claude Code does NOT persist to disk), we read the local OAuth access token
+ * from ~/.claude/.credentials.json and call Anthropic's own usage endpoint. The
+ * token is used only for that request to api.anthropic.com and is never logged
+ * or stored. No other credential store is read.
  */
 
 interface DailyActivity {
@@ -96,6 +102,89 @@ function claudePlan(oa: Record<string, unknown>): string {
   if (tier.includes('free')) return 'Free'
   if (orgType) return orgType.replace(/^claude_/, '').replace(/_/g, ' ')
   return 'Claude'
+}
+
+interface OAuthUsageWindow {
+  utilization?: number | null
+  resets_at?: string | null
+}
+
+interface OAuthUsageResponse {
+  five_hour?: OAuthUsageWindow | null
+  seven_day?: OAuthUsageWindow | null
+  seven_day_opus?: OAuthUsageWindow | null
+  seven_day_sonnet?: OAuthUsageWindow | null
+  extra_usage?: {
+    is_enabled?: boolean
+    monthly_limit?: number | null
+    used_credits?: number | null
+    utilization?: number | null
+    currency?: string | null
+  } | null
+}
+
+/**
+ * Fetch Claude's live plan-usage limits from Anthropic using the local OAuth
+ * token. Returns null on any failure (no token, expired, offline, non-200) so
+ * the rest of the usage panel still renders. Times out after 6s.
+ */
+async function fetchClaudeLimits(
+  home: string
+): Promise<{ limits: CliUsageLimit[]; credits?: string } | null> {
+  const creds = await readJson<{ claudeAiOauth?: { accessToken?: string; expiresAt?: number } }>(
+    join(home, '.claude', '.credentials.json')
+  )
+  const oauth = creds?.claudeAiOauth
+  const token = oauth?.accessToken
+  if (!token) return null
+  if (typeof oauth.expiresAt === 'number' && oauth.expiresAt < Date.now()) return null // token expired
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 6000)
+  try {
+    const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'anthropic-beta': 'oauth-2025-04-20',
+        'User-Agent': 'claude-cli'
+      },
+      signal: controller.signal
+    })
+    if (!res.ok) return null
+    const data = (await res.json()) as OAuthUsageResponse
+
+    const limits: CliUsageLimit[] = []
+    const add = (label: string, win: OAuthUsageWindow | null | undefined, windowMinutes: number): void => {
+      if (!win || typeof win.utilization !== 'number') return
+      limits.push({
+        label,
+        usedPercent: win.utilization,
+        windowMinutes,
+        resetsAt: win.resets_at ?? undefined
+      })
+    }
+    add('Current session', data.five_hour, 300)
+    add('Weekly · All models', data.seven_day, 10_080)
+    add('Weekly · Opus', data.seven_day_opus, 10_080)
+    add('Weekly · Sonnet', data.seven_day_sonnet, 10_080)
+    if (limits.length === 0) return null
+
+    let credits: string | undefined
+    const extra = data.extra_usage
+    if (extra?.is_enabled && typeof extra.used_credits === 'number') {
+      const cur = extra.currency || 'USD'
+      const used = extra.used_credits.toLocaleString(undefined, { style: 'currency', currency: cur })
+      credits =
+        typeof extra.monthly_limit === 'number'
+          ? `${used} of ${extra.monthly_limit.toLocaleString(undefined, { style: 'currency', currency: cur })} used`
+          : `${used} used`
+    }
+    return { limits, credits }
+  } catch {
+    return null // offline, aborted, or malformed response
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 async function readClaudeUsage(home: string): Promise<CliUsage> {
@@ -211,6 +300,17 @@ async function readClaudeUsage(home: string): Promise<CliUsage> {
     usage.note = 'Activity reflects Claude prompt history on this device.'
   }
 
+  // Live plan-usage limits (session + weekly windows) from Anthropic. These
+  // aren't written to disk by Claude Code, so this is the only way to show them.
+  const limitData = await fetchClaudeLimits(home)
+  if (limitData) {
+    usage.available = true
+    usage.limits = limitData.limits
+    if (limitData.credits) {
+      usage.note = usage.note ? `${usage.note} Usage credits: ${limitData.credits}.` : `Usage credits: ${limitData.credits}.`
+    }
+  }
+
   if (!usage.available) {
     usage.note = 'Claude Code is not signed in on this device, or its config was not found.'
   }
@@ -269,6 +369,25 @@ interface CodexRateLimits {
 }
 
 /**
+ * Read at most the last `maxBytes` of a file as UTF-8. Codex session logs can be
+ * hundreds of MB, so we never slurp the whole file — the freshest rate-limit
+ * reading is at the end anyway. The first (likely partial) line is discarded by
+ * the JSON.parse in the caller.
+ */
+async function readTail(path: string, maxBytes: number): Promise<string> {
+  const info = await stat(path).catch(() => null)
+  if (!info) return ''
+  const start = Math.max(0, info.size - maxBytes)
+  return new Promise((resolve) => {
+    let data = ''
+    const stream = createReadStream(path, { start, encoding: 'utf8' })
+    stream.on('data', (chunk) => (data += chunk))
+    stream.on('end', () => resolve(data))
+    stream.on('error', () => resolve(''))
+  })
+}
+
+/**
  * Codex writes the live `rate_limits` payload (5h primary + weekly secondary
  * windows, used %, reset time, plan) into each session rollout on every turn.
  * We scan the most recently touched sessions and take the freshest reading.
@@ -294,7 +413,7 @@ async function readCodexRateLimits(home: string): Promise<CodexRateLimits | null
 
   let best: { ts: number; rl: CodexRateLimits } | null = null
   for (const file of files.slice(0, 6)) {
-    const raw = await readFile(file.path, 'utf8').catch(() => '')
+    const raw = await readTail(file.path, 4 * 1024 * 1024)
     if (!raw.includes('"rate_limits"')) continue
     for (const line of raw.split('\n')) {
       if (!line.includes('"rate_limits"')) continue

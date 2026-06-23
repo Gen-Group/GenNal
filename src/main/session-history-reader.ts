@@ -1,6 +1,8 @@
 import { homedir } from 'os'
 import { join } from 'path'
-import { readdir, readFile, stat } from 'fs/promises'
+import { readdir, stat } from 'fs/promises'
+import { createReadStream } from 'fs'
+import { createInterface } from 'readline'
 import type { AgentSessionAgent, AgentSessionHistory, AgentSessionSummary } from '../shared/types'
 
 /**
@@ -21,6 +23,36 @@ interface Candidate {
   mtimeMs: number
 }
 
+/** USD price per million tokens, by token kind, for cost estimation. */
+interface TokenPrice {
+  input: number
+  output: number
+  cacheWrite: number
+  cacheRead: number
+}
+
+// Published list prices (USD / million tokens). Used only for a local estimate.
+const CLAUDE_PRICES: Record<'opus' | 'sonnet' | 'haiku', TokenPrice> = {
+  opus: { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.5 },
+  sonnet: { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
+  haiku: { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 }
+}
+
+function claudePrice(model: string | undefined): TokenPrice {
+  const m = (model ?? '').toLowerCase()
+  if (m.includes('opus')) return CLAUDE_PRICES.opus
+  if (m.includes('haiku')) return CLAUDE_PRICES.haiku
+  return CLAUDE_PRICES.sonnet // default for Sonnet / unknown Claude models
+}
+
+// Codex logs only a cumulative total-token count, so we apply a single blended
+// rate (GPT-5-class list pricing, weighted toward cached input) for the estimate.
+const CODEX_BLENDED_PER_M = 2.5
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
+
 /** Trim a prompt to a single tidy line for the list. */
 function tidyTitle(text: string): string {
   const oneLine = text.replace(/\s+/g, ' ').trim()
@@ -33,12 +65,30 @@ function isPreamble(text: string): boolean {
   return t.startsWith('# AGENTS.md') || t.startsWith('<INSTRUCTIONS>') || t.startsWith('# Instructions')
 }
 
-async function readLines(path: string): Promise<string[]> {
+// A single over-long line (e.g. a giant embedded blob) is skipped rather than
+// buffered, so memory stays bounded no matter how large the file is.
+const MAX_LINE_BYTES = 16 * 1024 * 1024
+
+/**
+ * Stream a JSONL file line by line, invoking `onLine` for each. Reads through a
+ * stream (never the whole file at once) so multi-hundred-MB session logs can't
+ * exhaust the heap. Errors and over-long lines degrade silently.
+ */
+async function forEachLine(path: string, onLine: (line: string) => void): Promise<void> {
   try {
-    const raw = await readFile(path, 'utf8')
-    return raw.split('\n')
+    const rl = createInterface({
+      input: createReadStream(path, { encoding: 'utf8', highWaterMark: 1 << 20 }),
+      crlfDelay: Infinity
+    })
+    try {
+      for await (const line of rl) {
+        if (line.length <= MAX_LINE_BYTES) onLine(line)
+      }
+    } finally {
+      rl.close()
+    }
   } catch {
-    return []
+    /* unreadable file — caller still gets whatever was parsed before the error */
   }
 }
 
@@ -115,7 +165,7 @@ async function listClaudeFiles(home: string): Promise<Candidate[]> {
   return out
 }
 
-function summarizeCodex(path: string, mtimeMs: number, lines: string[]): AgentSessionSummary {
+async function summarizeCodex(path: string, mtimeMs: number): Promise<AgentSessionSummary> {
   let id: string | undefined
   let cwd: string | undefined
   let branch: string | undefined
@@ -125,9 +175,9 @@ function summarizeCodex(path: string, mtimeMs: number, lines: string[]): AgentSe
   let tokens = 0
   let lastTs = 0
 
-  for (const line of lines) {
+  await forEachLine(path, (line) => {
     const obj = parse(line)
-    if (!obj) continue
+    if (!obj) return
     const ts = Date.parse(typeof obj.timestamp === 'string' ? obj.timestamp : '')
     if (Number.isFinite(ts) && ts > lastTs) lastTs = ts
     const type = obj.type
@@ -157,7 +207,7 @@ function summarizeCodex(path: string, mtimeMs: number, lines: string[]): AgentSe
     } else if (!model && typeof payload.model === 'string') {
       model = payload.model
     }
-  }
+  })
 
   return {
     id: id ?? path,
@@ -168,12 +218,13 @@ function summarizeCodex(path: string, mtimeMs: number, lines: string[]): AgentSe
     branch,
     messageCount,
     tokens,
+    cost: round2((tokens * CODEX_BLENDED_PER_M) / 1_000_000),
     updatedAt: new Date(lastTs || mtimeMs).toISOString(),
     filePath: path
   }
 }
 
-function summarizeClaude(path: string, mtimeMs: number, lines: string[]): AgentSessionSummary {
+async function summarizeClaude(path: string, mtimeMs: number): Promise<AgentSessionSummary> {
   let id: string | undefined
   let cwd: string | undefined
   let branch: string | undefined
@@ -181,11 +232,12 @@ function summarizeClaude(path: string, mtimeMs: number, lines: string[]): AgentS
   let title = ''
   let messageCount = 0
   let tokens = 0
+  let cost = 0
   let lastTs = 0
 
-  for (const line of lines) {
+  await forEachLine(path, (line) => {
     const obj = parse(line)
-    if (!obj) continue
+    if (!obj) return
     if (!id && typeof obj.sessionId === 'string') id = obj.sessionId
     if (typeof obj.cwd === 'string') cwd = obj.cwd
     if (typeof obj.gitBranch === 'string' && obj.gitBranch) branch = obj.gitBranch
@@ -199,18 +251,27 @@ function summarizeClaude(path: string, mtimeMs: number, lines: string[]): AgentS
         if (!model && typeof message.model === 'string') model = message.model
         const usage = message.usage as Record<string, unknown> | undefined
         if (usage) {
-          tokens +=
-            (Number(usage.input_tokens) || 0) +
-            (Number(usage.output_tokens) || 0) +
-            (Number(usage.cache_creation_input_tokens) || 0) +
-            (Number(usage.cache_read_input_tokens) || 0)
+          const input = Number(usage.input_tokens) || 0
+          const output = Number(usage.output_tokens) || 0
+          const cacheWrite = Number(usage.cache_creation_input_tokens) || 0
+          const cacheRead = Number(usage.cache_read_input_tokens) || 0
+          tokens += input + output + cacheWrite + cacheRead
+          // Price each message by the model that produced it (falls back to the
+          // session model), since a session can switch models mid-run.
+          const price = claudePrice(typeof message.model === 'string' ? message.model : model)
+          cost +=
+            (input * price.input +
+              output * price.output +
+              cacheWrite * price.cacheWrite +
+              cacheRead * price.cacheRead) /
+            1_000_000
         }
       } else if (!title) {
         const text = contentText(message.content)
         if (text && !isPreamble(text)) title = tidyTitle(text)
       }
     }
-  }
+  })
 
   return {
     id: id ?? path,
@@ -221,6 +282,7 @@ function summarizeClaude(path: string, mtimeMs: number, lines: string[]): AgentS
     branch,
     messageCount,
     tokens,
+    cost: round2(cost),
     updatedAt: new Date(lastTs || mtimeMs).toISOString(),
     filePath: path
   }
@@ -248,12 +310,13 @@ export async function readAgentSessionHistory(): Promise<AgentSessionHistory> {
     const scanned = candidates.length
     const recent = candidates.slice(0, RECENT_CAP)
 
-    const sessions = await mapLimit(recent, 8, async (candidate) => {
+    // Files are streamed line-by-line (see forEachLine), so memory stays bounded
+    // even for multi-hundred-MB logs; a low concurrency keeps the peak small.
+    const sessions = await mapLimit(recent, 4, async (candidate) => {
       try {
-        const lines = await readLines(candidate.path)
         return candidate.agent === 'codex'
-          ? summarizeCodex(candidate.path, candidate.mtimeMs, lines)
-          : summarizeClaude(candidate.path, candidate.mtimeMs, lines)
+          ? await summarizeCodex(candidate.path, candidate.mtimeMs)
+          : await summarizeClaude(candidate.path, candidate.mtimeMs)
       } catch {
         return null
       }

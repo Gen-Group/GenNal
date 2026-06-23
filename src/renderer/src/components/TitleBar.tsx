@@ -21,7 +21,7 @@ export default function TitleBar(): JSX.Element {
       <div className="tb-center">
         <button className="quick-cmd" onClick={() => togglePalette(true)}>
           <span>Quick command</span>
-          <kbd>Ctrl K</kbd>
+          <kbd>{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
         </button>
       </div>
 

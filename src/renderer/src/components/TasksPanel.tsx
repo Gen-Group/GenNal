@@ -63,6 +63,7 @@ export default function TasksPanel(): JSX.Element {
   const setGithubToken = useStore((s) => s.setGithubToken)
 
   const repo = parseGithubRepo(workspace?.git?.remoteUrl)
+  const hasNonGithubRemote = !repo && Boolean(workspace?.git?.remoteUrl)
   const [tab, setTab] = useState<TaskTab>('issues')
   const [scope, setScope] = useState<TaskScope>('open')
   const [query, setQuery] = useState<string>(() => buildQuery('issues', 'open'))
@@ -175,14 +176,14 @@ export default function TasksPanel(): JSX.Element {
       </header>
 
       <div className="tasks-tabs">
-        <div className="seg">
-          <button className={tab === 'issues' ? 'on' : ''} onClick={() => setTab('issues')}>
+        <div className="seg" role="group" aria-label="Work type">
+          <button className={tab === 'issues' ? 'on' : ''} aria-pressed={tab === 'issues'} onClick={() => setTab('issues')}>
             Issues
           </button>
-          <button className={tab === 'prs' ? 'on' : ''} onClick={() => setTab('prs')}>
+          <button className={tab === 'prs' ? 'on' : ''} aria-pressed={tab === 'prs'} onClick={() => setTab('prs')}>
             PRs
           </button>
-          <button className={tab === 'projects' ? 'on' : ''} onClick={() => setTab('projects')}>
+          <button className={tab === 'projects' ? 'on' : ''} aria-pressed={tab === 'projects'} onClick={() => setTab('projects')}>
             Projects
           </button>
         </div>
@@ -203,23 +204,17 @@ export default function TasksPanel(): JSX.Element {
       {tab !== 'projects' && (
         <>
           <div className="tasks-scope">
-            <div className="seg">
-              <button className={scope === 'open' ? 'on' : ''} onClick={() => setScope('open')}>
+            <div className="seg" role="group" aria-label="Scope">
+              <button className={scope === 'open' ? 'on' : ''} aria-pressed={scope === 'open'} onClick={() => setScope('open')}>
                 Open
               </button>
-              <button className={scope === 'assigned' ? 'on' : ''} onClick={() => setScope('assigned')}>
+              <button className={scope === 'assigned' ? 'on' : ''} aria-pressed={scope === 'assigned'} onClick={() => setScope('assigned')}>
                 Assigned to me
               </button>
             </div>
           </div>
 
           <div className="tasks-toolbar">
-            <button className="tasks-filter-btn" title="Filters">
-              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
-                <path d="M2 4h12M4 8h8M6 12h4" />
-              </svg>
-              Filters
-            </button>
             <div className="tasks-search">
               <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
                 <circle cx="7" cy="7" r="4.2" />
@@ -321,8 +316,14 @@ export default function TasksPanel(): JSX.Element {
               )}
               {!loading && !error && !repo && (
                 <div className="tasks-empty">
-                  <div className="tasks-empty-title">No GitHub repository</div>
-                  <div className="tasks-empty-sub">Open a project with a GitHub remote to see its work.</div>
+                  <div className="tasks-empty-title">
+                    {hasNonGithubRemote ? 'Remote isn’t on GitHub' : 'No GitHub repository'}
+                  </div>
+                  <div className="tasks-empty-sub">
+                    {hasNonGithubRemote
+                      ? 'Tasks currently supports github.com remotes only.'
+                      : 'Open a project with a GitHub remote to see its work.'}
+                  </div>
                 </div>
               )}
               {!loading && !error && repo && items.length === 0 && (

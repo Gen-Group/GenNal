@@ -13,6 +13,11 @@ function fitGrid(count: number, preferredRows: number, preferredCols: number): {
   return { rows: Math.ceil(count / cols), cols }
 }
 
+const clamp = (value: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, value))
+
+/** Fraction (0.2–1) of its grid cell a pane fills on each axis. */
+type PaneSize = { w: number; h: number }
+
 export default function PaneGrid(): JSX.Element {
   const gridRef = useRef<HTMLDivElement>(null)
   const sessions = useStore((s) => s.sessions)
@@ -21,13 +26,11 @@ export default function PaneGrid(): JSX.Element {
   const cols = useStore((s) => s.cols)
   const mode = useStore((s) => s.mode)
   const activeId = useStore((s) => s.activeId)
-  const [colSizes, setColSizes] = useState<number[]>([])
-  const [rowSizes, setRowSizes] = useState<number[]>([])
-  // Fraction (0.25–1) of the grid a lone terminal occupies on each axis, so a
-  // single pane can be shrunk/grown even though there's no neighbour to push
-  // against (multi-pane resizing redistributes fr units between tracks instead).
-  const [soloW, setSoloW] = useState(1)
-  const [soloH, setSoloH] = useState(1)
+  // Each pane is resized independently within its own grid cell: dragging an
+  // edge shrinks/grows just that terminal (anchored top-left, leaving a gap),
+  // without disturbing its neighbours. Sizes are keyed by session id.
+  const [paneSizes, setPaneSizes] = useState<Record<string, PaneSize>>({})
+  const sizeFor = (id: string): PaneSize => paneSizes[id] ?? { w: 1, h: 1 }
 
   // Terminals belong to the project they were opened in. We always render every
   // session so its live shell is never unmounted (which would kill the pty), and
@@ -43,51 +46,40 @@ export default function PaneGrid(): JSX.Element {
   const visibleIds = new Set(tiled ? mine.map((s) => s.id) : focusedId ? [focusedId] : [])
 
   const grid = fitGrid(mine.length, rows, cols)
-  const columns = colSizes.length === grid.cols ? colSizes : Array(grid.cols).fill(1)
-  const gridRows = rowSizes.length === grid.rows ? rowSizes : Array(grid.rows).fill(1)
 
-  // Exactly one tiled terminal: it gets edge handles instead of the between-pane
-  // resizers, which need a neighbouring track to trade space with.
-  const solo = tiled && mine.length === 1
-
+  // Drop any per-pane sizes for sessions that have closed, so the map doesn't
+  // grow unbounded as terminals come and go.
   useEffect(() => {
-    setColSizes(Array(grid.cols).fill(1))
-    setRowSizes(Array(grid.rows).fill(1))
-  }, [grid.cols, grid.rows])
+    setPaneSizes((prev) => {
+      const live = Object.keys(prev).filter((id) => sessions.some((s) => s.id === id))
+      if (live.length === Object.keys(prev).length) return prev
+      return Object.fromEntries(live.map((id) => [id, prev[id]]))
+    })
+  }, [sessions])
 
-  // Reset the lone-pane size whenever we leave the solo case, so reopening a
-  // single terminal starts full-size rather than at the last drag.
-  useEffect(() => {
-    if (!solo) {
-      setSoloW(1)
-      setSoloH(1)
-    }
-  }, [solo])
-
-  const startResize = (axis: 'col' | 'row', index: number, event: ReactPointerEvent): void => {
+  // Drag a pane's edge: measure its grid cell once, then map the pointer
+  // position to a 0.2–1 fraction of that cell. The cell tracks stay fixed
+  // (all 1fr), so a shrinking pane only opens a gap — neighbours don't move.
+  const startPaneResize = (
+    id: string,
+    axis: 'col' | 'row' | 'both',
+    event: ReactPointerEvent
+  ): void => {
     event.preventDefault()
     event.stopPropagation()
 
-    const rect = gridRef.current?.getBoundingClientRect()
+    const cell = (event.currentTarget as HTMLElement).closest('.pane-cell')
+    const rect = cell?.getBoundingClientRect()
     if (!rect) return
 
-    const start = axis === 'col' ? event.clientX : event.clientY
-    const size = axis === 'col' ? rect.width : rect.height
-    const initial = axis === 'col' ? [...columns] : [...gridRows]
-    const total = initial.reduce((sum, value) => sum + value, 0)
-    const pairTotal = initial[index] + initial[index + 1]
-    const minTrack = Math.min(0.45, pairTotal / 2)
-
     const onMove = (moveEvent: PointerEvent): void => {
-      const current = axis === 'col' ? moveEvent.clientX : moveEvent.clientY
-      const delta = ((current - start) / Math.max(size, 1)) * total
-      const next = [...initial]
-      const before = Math.max(minTrack, Math.min(pairTotal - minTrack, initial[index] + delta))
-      next[index] = before
-      next[index + 1] = pairTotal - before
-
-      if (axis === 'col') setColSizes(next)
-      else setRowSizes(next)
+      setPaneSizes((prev) => {
+        const current = prev[id] ?? { w: 1, h: 1 }
+        const next = { ...current }
+        if (axis !== 'row') next.w = clamp((moveEvent.clientX - rect.left) / Math.max(rect.width, 1), 0.2, 1)
+        if (axis !== 'col') next.h = clamp((moveEvent.clientY - rect.top) / Math.max(rect.height, 1), 0.2, 1)
+        return { ...prev, [id]: next }
+      })
     }
 
     const onUp = (): void => {
@@ -101,75 +93,71 @@ export default function PaneGrid(): JSX.Element {
     window.addEventListener('pointerup', onUp)
   }
 
-  const startSoloResize = (axis: 'col' | 'row', event: ReactPointerEvent): void => {
-    event.preventDefault()
-    event.stopPropagation()
-
-    const rect = gridRef.current?.getBoundingClientRect()
-    if (!rect) return
-
-    const start = axis === 'col' ? event.clientX : event.clientY
-    const size = axis === 'col' ? rect.width : rect.height
-    const initial = axis === 'col' ? soloW : soloH
-
-    const onMove = (moveEvent: PointerEvent): void => {
-      const current = axis === 'col' ? moveEvent.clientX : moveEvent.clientY
-      const delta = (current - start) / Math.max(size, 1)
-      const next = Math.max(0.25, Math.min(1, initial + delta))
-      if (axis === 'col') setSoloW(next)
-      else setSoloH(next)
-    }
-
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      document.body.classList.remove('resizing-grid')
-    }
-
-    document.body.classList.add('resizing-grid')
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }
-
-  const percentPositions = (sizes: number[]): number[] => {
-    const total = sizes.reduce((sum, value) => sum + value, 0)
-    let current = 0
-    return sizes.slice(0, -1).map((size) => {
-      current += size
-      return (current / total) * 100
+  // Double-click a resizer to snap that axis (or both) back to an even split.
+  const resetPaneSize = (id: string, axis: 'col' | 'row' | 'both'): void => {
+    setPaneSizes((prev) => {
+      const current = prev[id] ?? { w: 1, h: 1 }
+      const next = { ...current }
+      if (axis !== 'row') next.w = 1
+      if (axis !== 'col') next.h = 1
+      return { ...prev, [id]: next }
     })
   }
-
-  const showResizers = tiled && mine.length > 1
 
   return (
     <div
       ref={gridRef}
       className={`pane-grid mode-${mode}`}
-      style={
-        solo
-          ? {
-              gridTemplateColumns:
-                soloW >= 0.999
-                  ? 'minmax(0, 1fr)'
-                  : `minmax(0, ${soloW}fr) minmax(0, ${1 - soloW}fr)`,
-              gridTemplateRows:
-                soloH >= 0.999
-                  ? 'minmax(0, 1fr)'
-                  : `minmax(0, ${soloH}fr) minmax(0, ${1 - soloH}fr)`
-            }
-          : tiled
-            ? {
-                gridTemplateColumns: columns.map((value) => `minmax(0, ${value}fr)`).join(' '),
-                gridTemplateRows: gridRows.map((value) => `minmax(0, ${value}fr)`).join(' ')
-              }
-            : undefined
-      }
+      style={{
+        gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))`,
+        gridTemplateRows: `repeat(${grid.rows}, minmax(0, 1fr))`
+      }}
     >
       {sessions.map((s) => {
         const number = mine.findIndex((m) => m.id === s.id) + 1
+        const visible = visibleIds.has(s.id)
+        const size = sizeFor(s.id)
         return (
-          <ModelPane key={s.id} session={s} hidden={!visibleIds.has(s.id)} number={number || undefined} />
+          <div
+            key={s.id}
+            className="pane-cell"
+            style={{ display: visible ? undefined : 'none' }}
+          >
+            <div
+              className="pane-cell-inner"
+              style={{
+                width: size.w >= 0.999 ? undefined : `${size.w * 100}%`,
+                height: size.h >= 0.999 ? undefined : `${size.h * 100}%`
+              }}
+            >
+              <ModelPane session={s} hidden={!visible} number={number || undefined} />
+              {tiled && visible && (
+                <>
+                  <button
+                    className="pane-edge-resizer pane-edge-right"
+                    aria-label={`Resize terminal ${number} width (double-click to reset)`}
+                    title="Drag to resize · double-click to reset"
+                    onPointerDown={(event) => startPaneResize(s.id, 'col', event)}
+                    onDoubleClick={() => resetPaneSize(s.id, 'col')}
+                  />
+                  <button
+                    className="pane-edge-resizer pane-edge-bottom"
+                    aria-label={`Resize terminal ${number} height (double-click to reset)`}
+                    title="Drag to resize · double-click to reset"
+                    onPointerDown={(event) => startPaneResize(s.id, 'row', event)}
+                    onDoubleClick={() => resetPaneSize(s.id, 'row')}
+                  />
+                  <button
+                    className="pane-edge-resizer pane-edge-corner"
+                    aria-label={`Resize terminal ${number} (double-click to reset)`}
+                    title="Drag to resize · double-click to reset"
+                    onPointerDown={(event) => startPaneResize(s.id, 'both', event)}
+                    onDoubleClick={() => resetPaneSize(s.id, 'both')}
+                  />
+                </>
+              )}
+            </div>
+          </div>
         )
       })}
 
@@ -182,44 +170,6 @@ export default function PaneGrid(): JSX.Element {
             <ModelMenu label="+ New Session" variant="primary" />
           </div>
         </div>
-      )}
-
-      {showResizers &&
-        percentPositions(columns).map((left, index) => (
-          <button
-            key={`col-${index}`}
-            className="grid-resizer col-resizer"
-            style={{ left: `${left}%` }}
-            aria-label={`Resize terminal column ${index + 1}`}
-            onPointerDown={(event) => startResize('col', index, event)}
-          />
-        ))}
-      {showResizers &&
-        percentPositions(gridRows).map((top, index) => (
-          <button
-            key={`row-${index}`}
-            className="grid-resizer row-resizer"
-            style={{ top: `${top}%` }}
-            aria-label={`Resize terminal row ${index + 1}`}
-            onPointerDown={(event) => startResize('row', index, event)}
-          />
-        ))}
-
-      {solo && (
-        <>
-          <button
-            className="grid-resizer col-resizer solo-resizer"
-            style={{ left: `${soloW * 100}%` }}
-            aria-label="Resize terminal width"
-            onPointerDown={(event) => startSoloResize('col', event)}
-          />
-          <button
-            className="grid-resizer row-resizer solo-resizer"
-            style={{ top: `${soloH * 100}%` }}
-            aria-label="Resize terminal height"
-            onPointerDown={(event) => startSoloResize('row', event)}
-          />
-        </>
       )}
     </div>
   )

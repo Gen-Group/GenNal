@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store'
+import Modal from './Modal'
 
 /** Branch/repo glyph shown beside each discovered repository. */
 function RepoGlyph(): JSX.Element {
@@ -31,16 +32,6 @@ export default function ImportReposDialog(): JSX.Element | null {
     setMonorepoName(scan?.name ?? '')
   }, [scan, repoPaths])
 
-  // Close on Escape for keyboard users.
-  useEffect(() => {
-    if (!scan) return
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') dismiss()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [scan, dismiss])
-
   if (!scan) return null
 
   const total = scan.repos.length
@@ -61,13 +52,12 @@ export default function ImportReposDialog(): JSX.Element | null {
   }
 
   return (
-    <div className="import-repos-backdrop" onMouseDown={dismiss}>
+    <Modal onClose={dismiss}>
       <div
         className="import-repos-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="import-repos-title"
-        onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="import-repos-head">
           <button className="import-repos-close" title="Close" aria-label="Close" onClick={dismiss}>
@@ -155,12 +145,13 @@ export default function ImportReposDialog(): JSX.Element | null {
           </button>
           <button
             className="import-repos-primary"
-            onClick={() => void importAsMonorepo(monorepoName)}
+            disabled={selectedPaths.length === 0}
+            onClick={() => void importAsMonorepo(monorepoName.trim() || scan.name)}
           >
             Yes, import as monorepo
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }

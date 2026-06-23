@@ -6,6 +6,11 @@ import type {
   ChatExit,
   ChatSendPayload,
   CliUsage,
+  ComputerUseAction,
+  ComputerUseResult,
+  ComputerUseScreen,
+  ComputerUseScreenshot,
+  ComputerUseSetup,
   EmulatorList,
   FolderScanResult,
   GithubFetchPayload,
@@ -13,6 +18,7 @@ import type {
   MobileContext,
   MobileStatus,
   ModelDef,
+  ProjectInfo,
   PtyCreatePayload,
   PtyData,
   PtyExit,
@@ -60,6 +66,7 @@ const api = {
     ipcRenderer.invoke('workspace:open', kind),
   openWorkspacePath: (payload: WorkspaceOpenPathPayload): Promise<WorkspaceOpenResult> =>
     ipcRenderer.invoke('workspace:open-path', payload),
+  projectInfo: (path: string): Promise<ProjectInfo> => ipcRenderer.invoke('project:info', path),
   pickProjectFolder: (): Promise<FolderScanResult | null> =>
     ipcRenderer.invoke('workspace:pick-folder'),
   scanProjectFolder: (path: string): Promise<FolderScanResult> =>
@@ -141,6 +148,14 @@ const api = {
     stop: (): Promise<MobileStatus> => ipcRenderer.invoke('mobile:stop'),
     status: (): Promise<MobileStatus> => ipcRenderer.invoke('mobile:status'),
     setContext: (ctx: MobileContext): void => ipcRenderer.send('mobile:context', ctx)
+  },
+
+  computerUse: {
+    setup: (): Promise<ComputerUseSetup> => ipcRenderer.invoke('computer-use:setup'),
+    screen: (): Promise<ComputerUseScreen> => ipcRenderer.invoke('computer-use:screen'),
+    screenshot: (): Promise<ComputerUseScreenshot> => ipcRenderer.invoke('computer-use:screenshot'),
+    perform: (action: ComputerUseAction): Promise<ComputerUseResult> =>
+      ipcRenderer.invoke('computer-use:perform', action)
   },
 
   zoom: {

@@ -1,6 +1,9 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useId, useState, type CSSProperties } from 'react'
 import { useStore, activeProjectPath } from '../store'
 import type { WorkspaceFile } from '../../../shared/types'
+
+/** Number of samples kept for the System Overview sparklines. */
+const OVERVIEW_HISTORY = 36
 
 interface FileTreeNode {
   name: string
@@ -198,14 +201,53 @@ function userInitials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
-function Spark({ color }: { color: string }): JSX.Element {
-  // Decorative sparkline matching the screenshot's System Overview.
-  const pts = '0,14 12,9 24,12 36,5 48,10 60,3 72,8 84,6 96,11'
+/**
+ * A live area sparkline over a rolling window of real samples. `values` is the
+ * history (oldest→newest); `max` fixes the vertical scale (e.g. 100 for a
+ * percentage) so the line reflects absolute level, not just relative shape.
+ */
+function Spark({ values, color, max }: { values: number[]; color: string; max?: number }): JSX.Element {
+  const id = useId()
+  const W = 96
+  const H = 28
+  const padL = 1.5
+  const padR = 4 // room for the end dot
+  const padT = 3
+  const padB = 2
+
+  const data = values.length > 0 ? values : [0, 0]
+  const hi = Math.max(max ?? 0, ...data, 1)
+  const n = data.length
+  const spanX = W - padL - padR
+  const spanY = H - padT - padB
+  const x = (i: number): number => padL + (n > 1 ? (i / (n - 1)) * spanX : spanX)
+  const y = (v: number): number => padT + spanY - (Math.min(Math.max(v, 0), hi) / hi) * spanY
+
+  const points = data.map((v, i) => [x(i), y(v)] as const)
+  const line = points.map(([px, py], i) => `${i ? 'L' : 'M'}${px.toFixed(1)},${py.toFixed(1)}`).join(' ')
+  const area = `${line} L${x(n - 1).toFixed(1)},${H} L${padL},${H} Z`
+  const [lx, ly] = points[points.length - 1]
+
   return (
-    <svg className="spark" viewBox="0 0 96 18" preserveAspectRatio="none">
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.6" />
+    <svg className="spark" viewBox={`0 0 ${W} ${H}`} role="img" aria-hidden="true">
+      <defs>
+        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.32" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#${id})`} />
+      <path d={line} fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={lx} cy={ly} r="2.1" fill={color} />
     </svg>
   )
+}
+
+/** Green → amber → red by load percentage, for CPU/memory readouts. */
+function loadTone(pct: number): 'ok' | 'warn' | 'crit' {
+  if (pct >= 85) return 'crit'
+  if (pct >= 65) return 'warn'
+  return 'ok'
 }
 
 export default function Sidebar(): JSX.Element {
@@ -227,7 +269,6 @@ export default function Sidebar(): JSX.Element {
     name: string
   } | null>(null)
   const [addProjectOpen, setAddProjectOpen] = useState(false)
-  const [activeNav, setActiveNav] = useState<'tasks' | 'automations' | null>(null)
   const sessions = useStore((s) => s.sessions)
   const activeId = useStore((s) => s.activeId)
   const setActive = useStore((s) => s.setActive)
@@ -243,6 +284,8 @@ export default function Sidebar(): JSX.Element {
   const toggleHistory = useStore((s) => s.toggleHistory)
   const simulatorsOpen = useStore((s) => s.simulatorsOpen)
   const toggleSimulators = useStore((s) => s.toggleSimulators)
+  const computerUseOpen = useStore((s) => s.computerUseOpen)
+  const toggleComputerUse = useStore((s) => s.toggleComputerUse)
   const mobileOpen = useStore((s) => s.mobileOpen)
   const toggleMobile = useStore((s) => s.toggleMobile)
   const profile = useStore((s) => s.profile)
@@ -257,12 +300,31 @@ export default function Sidebar(): JSX.Element {
   const openWorkspaceFile = useStore((s) => s.openWorkspaceFile)
   const createWorkspaceFile = useStore((s) => s.createWorkspaceFile)
   const createWorkspaceFolder = useStore((s) => s.createWorkspaceFolder)
+  const prompt = useStore((s) => s.prompt)
   const openImagePreview = useStore((s) => s.openImagePreview)
   const workspaceName = workspace?.name ?? 'Open workspace'
   // Only show terminals that belong to the active project (terminals are scoped
   // per project, matching what the main grid displays).
   const projectSessions = sessions.filter((s) => s.projectPath === activeProjectPath(workspace))
   const running = projectSessions.filter((s) => s.status === 'running').length
+
+  const memPct = stats.memTotalMB > 0 ? (stats.memUsedMB / stats.memTotalMB) * 100 : 0
+  const memTotalGB = stats.memTotalMB > 0 ? Math.round(stats.memTotalMB / 1024) : 0
+  const [cpuHistory, setCpuHistory] = useState<number[]>([])
+  const [memHistory, setMemHistory] = useState<number[]>([])
+  const [modelHistory, setModelHistory] = useState<number[]>([])
+
+  // Append a real sample on every stats tick so the sparklines reflect live
+  // system load instead of a fixed decorative shape.
+  useEffect(() => {
+    const push = (value: number) => (h: number[]): number[] =>
+      [...h, value].slice(-OVERVIEW_HISTORY)
+    setCpuHistory(push(stats.cpu))
+    setMemHistory(push(memPct))
+    setModelHistory(push(running))
+    // running/memPct are read fresh each render; keying on stats matches the tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stats])
   const primarySessions = projectSessions.slice(0, 3)
   const aiModel = models.find((model) => model.id === 'codex') ?? models.find((model) => model.id !== 'custom')
   const cliModel = models.find((model) => model.id === 'custom') ?? models[0]
@@ -296,6 +358,15 @@ export default function Sidebar(): JSX.Element {
       window.removeEventListener('keydown', closeAll)
     }
   }, [folderMenu, fileMenu, workspaceMenu, filterMenu])
+
+  useEffect(() => {
+    if (!confirmRemoveProject) return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setConfirmRemoveProject(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [confirmRemoveProject])
 
   // When a project opens, start a large/multi-repo tree collapsed so the user
   // sees a tidy list of folders to expand (like the OS folder picker) rather
@@ -338,13 +409,21 @@ export default function Sidebar(): JSX.Element {
     return `${folder.replace(/\\/g, '/')}/${cleanName}`
   }
 
-  const promptNewFile = (folder?: string): void => {
-    const name = window.prompt('New file path')
+  const promptNewFile = async (folder?: string): Promise<void> => {
+    const name = await prompt({
+      title: 'New file',
+      placeholder: folder && folder !== 'Root' ? `${folder}/name.ext` : 'name.ext',
+      confirmLabel: 'Create'
+    })
     if (name?.trim()) void createWorkspaceFile(nestedPath(folder, name))
   }
 
-  const promptNewFolder = (folder?: string): void => {
-    const name = window.prompt('New folder path')
+  const promptNewFolder = async (folder?: string): Promise<void> => {
+    const name = await prompt({
+      title: 'New folder',
+      placeholder: folder && folder !== 'Root' ? `${folder}/name` : 'name',
+      confirmLabel: 'Create'
+    })
     if (name?.trim()) void createWorkspaceFolder(nestedPath(folder, name))
   }
 
@@ -449,10 +528,7 @@ export default function Sidebar(): JSX.Element {
         <button
           className={`side-nav-item ${tasksOpen ? 'active' : ''}`}
           title="Tasks"
-          onClick={() => {
-            setActiveNav('tasks')
-            toggleTasks(true)
-          }}
+          onClick={() => toggleTasks(true)}
         >
           <span className="nav-ico" aria-hidden="true">
             <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
@@ -465,10 +541,7 @@ export default function Sidebar(): JSX.Element {
         <button
           className={`side-nav-item ${automationsOpen ? 'active' : ''}`}
           title="Automations"
-          onClick={() => {
-            setActiveNav('automations')
-            toggleAutomations(true)
-          }}
+          onClick={() => toggleAutomations(true)}
         >
           <span className="nav-ico" aria-hidden="true">
             <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
@@ -482,10 +555,7 @@ export default function Sidebar(): JSX.Element {
         <button
           className={`side-nav-item ${historyOpen ? 'active' : ''}`}
           title="Agent Session History"
-          onClick={() => {
-            setActiveNav(null)
-            toggleHistory(true)
-          }}
+          onClick={() => toggleHistory(true)}
         >
           <span className="nav-ico" aria-hidden="true">
             <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
@@ -499,10 +569,7 @@ export default function Sidebar(): JSX.Element {
         <button
           className={`side-nav-item ${simulatorsOpen ? 'active' : ''}`}
           title="Mobile Simulators — boot Android / iOS devices"
-          onClick={() => {
-            setActiveNav(null)
-            toggleSimulators(true)
-          }}
+          onClick={() => toggleSimulators(true)}
         >
           <span className="nav-ico" aria-hidden="true">
             <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
@@ -512,6 +579,20 @@ export default function Sidebar(): JSX.Element {
             </svg>
           </span>
           <span className="nav-label">Simulators</span>
+        </button>
+        <button
+          className={`side-nav-item ${computerUseOpen ? 'active' : ''}`}
+          title="Computer Use — let an AI control your desktop"
+          onClick={() => toggleComputerUse(true)}
+        >
+          <span className="nav-ico" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="3" width="12" height="8" rx="1.3" />
+              <path d="M6 13.5h4M8 11v2.5" />
+              <circle cx="8" cy="7" r="1.4" />
+            </svg>
+          </span>
+          <span className="nav-label">Computer Use</span>
         </button>
         <button
           className={`side-nav-item ${mobileOpen ? 'active' : ''}`}
@@ -931,21 +1012,21 @@ export default function Sidebar(): JSX.Element {
                 <div className="ov-big">{running} Active</div>
                 <div className="ov-sub">Models</div>
               </div>
-              <Spark color="#22c55e" />
+              <Spark values={modelHistory} color="#22c55e" />
             </div>
             <div className="ov-row">
               <div>
                 <div className="ov-big">{(stats.memUsedMB / 1024).toFixed(1)} GB</div>
                 <div className="ov-sub">Memory</div>
               </div>
-              <Spark color="#4285f4" />
+              <Spark values={memHistory} color="#4285f4" max={100} />
             </div>
             <div className="ov-row">
               <div>
                 <div className="ov-big">{stats.cpu}%</div>
                 <div className="ov-sub">CPU</div>
               </div>
-              <Spark color="#7c5cff" />
+              <Spark values={cpuHistory} color="#7c5cff" max={100} />
             </div>
           </>
         )}
@@ -1089,23 +1170,26 @@ export default function Sidebar(): JSX.Element {
               </svg>
             </button>
             <div className="confirm-icon" aria-hidden="true">
-              <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 4h10M6 4V2.5h4V4M5 4l.5 9h5l.5-9" />
+              <svg viewBox="0 0 18 18" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2.25 5.25V4a1.5 1.5 0 0 1 1.5-1.5h2.4a1.5 1.5 0 0 1 1.2.6l.6.8a1.5 1.5 0 0 0 1.2.6h4.1a1.5 1.5 0 0 1 1.5 1.5v6.75a1.5 1.5 0 0 1-1.5 1.5H3.75a1.5 1.5 0 0 1-1.5-1.5V5.25Z" />
+                <path d="M6.5 9.75h5" />
               </svg>
             </div>
             <div className="confirm-copy">
               <h3 id="remove-project-title">Close this project?</h3>
               <p>
-                Remove <strong>{confirmRemoveProject.name}</strong> from the projects list.
-                Your files won&apos;t be deleted.
+                Remove <span className="confirm-target">{confirmRemoveProject.name}</span> from your
+                projects list. Your files stay on disk &mdash; nothing is deleted.
               </p>
             </div>
             <div className="confirm-actions">
               <button
                 className="confirm-secondary"
+                autoFocus
                 onClick={() => setConfirmRemoveProject(null)}
               >
                 Cancel
+                <kbd className="confirm-kbd">Esc</kbd>
               </button>
               <button
                 className="confirm-primary"

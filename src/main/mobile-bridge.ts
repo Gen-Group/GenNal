@@ -4,13 +4,23 @@ import { randomBytes } from 'crypto'
 import { startChat, cancelChat, type ChatSink } from './chat-manager'
 import { writeSession, addPtyListeners, listSessionIds } from './pty-manager'
 import { loadModels } from './model-registry'
-import type { MobileContext, MobileStatus } from '../shared/types'
+import type { MobileContext, MobileDevice, MobileStatus } from '../shared/types'
 import { MOBILE_CLIENT_HTML } from './mobile-client'
 
 // Preferred port for the LAN bridge. If it's taken we fall back to an
 // OS-assigned ephemeral port so a second window (or a leftover process) can't
 // block the feature.
 const PREFERRED_PORT = 8765
+
+/** A connected phone, kept alive by its open SSE stream(s). */
+interface DeviceRecord {
+  id: string
+  name: string
+  ip: string
+  connectedAt: number
+  /** Number of open SSE streams; the device is gone once this hits zero. */
+  streams: number
+}
 
 interface BridgeState {
   server: Server
@@ -23,6 +33,8 @@ interface BridgeState {
   chatStreams: Set<ServerResponse>
   /** Open SSE connections streaming terminal output to phones. */
   ptyStreams: Set<ServerResponse>
+  /** Phones currently connected, keyed by address + user agent. */
+  devices: Map<string, DeviceRecord>
   detachPty: () => void
   heartbeat: NodeJS.Timeout
 }
@@ -67,6 +79,62 @@ function lanAddresses(): string[] {
   return candidates.map((c) => c.ip)
 }
 
+// Turn a phone's User-Agent into a short, human-friendly device name. We only
+// need enough to tell devices apart in the UI, not exact model detection.
+function deviceNameFromUA(ua: string): string {
+  if (!ua) return 'Unknown device'
+  if (/iPhone/i.test(ua)) return 'iPhone'
+  if (/iPad/i.test(ua)) return 'iPad'
+  if (/Android/i.test(ua)) {
+    // UAs look like "Linux; Android 13; Pixel 7) ..." — grab the model token.
+    // Modern Chrome freezes the model to a bare "K" for privacy, so older
+    // browsers (Samsung Internet, Firefox) are where a real model survives.
+    const name = ua.match(/Android[\s\d.]*;\s*([^;)]+?)(?:\s+Build\/|[);])/i)?.[1]?.trim()
+    const real = name && name !== 'K' && name.length > 1 && !/^[\d.\s]+$/.test(name)
+    return real ? name! : 'Android phone'
+  }
+  if (/Macintosh/i.test(ua)) return 'Mac'
+  if (/Windows/i.test(ua)) return 'Windows PC'
+  if (/Linux/i.test(ua)) return 'Linux device'
+  return 'Phone'
+}
+
+// The phone's address, stripping the IPv4-mapped-IPv6 prefix Node may add.
+function clientIp(req: IncomingMessage): string {
+  const fwd = req.headers['x-forwarded-for']
+  if (typeof fwd === 'string' && fwd) return fwd.split(',')[0]!.trim()
+  return (req.socket.remoteAddress ?? 'unknown').replace(/^::ffff:/, '')
+}
+
+// Register a phone as connected for the lifetime of one SSE stream. Returns a
+// teardown to call when that stream closes; the device disappears once its last
+// stream is gone.
+function trackDevice(req: IncomingMessage): () => void {
+  if (!state) return () => {}
+  const ip = clientIp(req)
+  const ua = (req.headers['user-agent'] as string) ?? ''
+  const id = `${ip}|${ua}`
+  let dev = state.devices.get(id)
+  if (!dev) {
+    dev = { id, name: deviceNameFromUA(ua), ip, connectedAt: Date.now(), streams: 0 }
+    state.devices.set(id, dev)
+  }
+  dev.streams++
+  return () => {
+    if (!state) return
+    const current = state.devices.get(id)
+    if (!current) return
+    current.streams--
+    if (current.streams <= 0) state.devices.delete(id)
+  }
+}
+
+function devicesOf(s: BridgeState): MobileDevice[] {
+  return [...s.devices.values()]
+    .sort((a, b) => b.connectedAt - a.connectedAt)
+    .map((d) => ({ id: d.id, name: d.name, ip: d.ip, connectedAt: d.connectedAt }))
+}
+
 function statusFrom(s: BridgeState): MobileStatus {
   const base = `http://${s.host}:${s.port}`
   return {
@@ -76,7 +144,8 @@ function statusFrom(s: BridgeState): MobileStatus {
     port: s.port,
     token: s.token,
     url: `${base}/?t=${s.token}`,
-    displayUrl: base
+    displayUrl: base,
+    devices: devicesOf(s)
   }
 }
 
@@ -122,8 +191,9 @@ function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   })
 }
 
-// Open an SSE connection: stream events until the client disconnects.
-function openStream(res: ServerResponse, pool: Set<ServerResponse>): void {
+// Open an SSE connection: stream events until the client disconnects. The open
+// stream also marks the requesting phone as a connected device.
+function openStream(req: IncomingMessage, res: ServerResponse, pool: Set<ServerResponse>): void {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-store',
@@ -131,7 +201,11 @@ function openStream(res: ServerResponse, pool: Set<ServerResponse>): void {
   })
   res.write(': connected\n\n')
   pool.add(res)
-  res.on('close', () => pool.delete(res))
+  const untrack = trackDevice(req)
+  res.on('close', () => {
+    pool.delete(res)
+    untrack()
+  })
 }
 
 function broadcast(pool: Set<ServerResponse>, event: string, data: unknown): void {
@@ -180,7 +254,7 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
   // Chat reply stream (one persistent connection per phone; events carry the id
   // of the message they belong to so the client can match them up).
   if (req.method === 'GET' && path === '/api/chat/stream') {
-    openStream(res, state!.chatStreams)
+    openStream(req, res, state!.chatStreams)
     return
   }
 
@@ -200,7 +274,7 @@ function handleRequest(req: IncomingMessage, res: ServerResponse): void {
 
   // Terminal mirroring.
   if (req.method === 'GET' && path === '/api/pty/stream') {
-    openStream(res, state!.ptyStreams)
+    openStream(req, res, state!.ptyStreams)
     return
   }
 
@@ -328,7 +402,8 @@ export async function startMobileBridge(): Promise<MobileStatus> {
     }
   }, 25_000)
 
-  state = { server, token, host, addresses, port, chatStreams, ptyStreams, detachPty, heartbeat }
+  const devices = new Map<string, DeviceRecord>()
+  state = { server, token, host, addresses, port, chatStreams, ptyStreams, devices, detachPty, heartbeat }
   return statusFrom(state)
 }
 

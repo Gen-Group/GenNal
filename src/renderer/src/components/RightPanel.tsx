@@ -93,6 +93,7 @@ export default function RightPanel(): JSX.Element {
   const setPreviewCenter = useStore((s) => s.setPreviewCenter)
   const openWorkspace = useStore((s) => s.openWorkspace)
   const createWorkspaceFile = useStore((s) => s.createWorkspaceFile)
+  const prompt = useStore((s) => s.prompt)
   const updateWorkspaceContent = useStore((s) => s.updateWorkspaceContent)
   const saveWorkspaceFile = useStore((s) => s.saveWorkspaceFile)
   const runOutput = useStore((s) => s.runOutput)
@@ -167,8 +168,8 @@ export default function RightPanel(): JSX.Element {
     void runFile()
   }
 
-  const handleNewFile = (): void => {
-    const name = window.prompt('New file path')
+  const handleNewFile = async (): Promise<void> => {
+    const name = await prompt({ title: 'New file', placeholder: 'name.ext', confirmLabel: 'Create' })
     if (name?.trim()) void createWorkspaceFile(name.trim())
   }
 

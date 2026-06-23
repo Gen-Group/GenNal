@@ -1,5 +1,6 @@
 import { useStore } from '../store'
 import HelpMenu from './HelpMenu'
+import { APP_VERSION } from '../version'
 
 export default function StatusBar(): JSX.Element {
   const stats = useStore((s) => s.stats)
@@ -22,15 +23,18 @@ export default function StatusBar(): JSX.Element {
         </button>
         <HelpMenu />
       </span>
-      <span className="sb-item">● Main</span>
-      <span className="sb-item">Layout: {mode} ({rows}×{cols})</span>
+      <span className="sb-item">
+        <span className={`sb-dot ${sessions.length > 0 ? 'on' : ''}`} aria-hidden="true" />
+        {sessions.length} {sessions.length === 1 ? 'session' : 'sessions'}
+      </span>
+      <span className="sb-item">Layout <b className="sb-val">{mode} {rows}×{cols}</b></span>
       <span className="sb-item">UTF-8</span>
-      <span className="sb-item">Shell: {window.api.shellName}</span>
+      <span className="sb-item">Shell <b className="sb-val">{window.api.shellName}</b></span>
       <span className="sb-spacer" />
-      <span className="sb-item">{active ? `Model: ${active.label}` : 'No model'}</span>
-      <span className="sb-item">CPU: {stats.cpu}%</span>
-      <span className="sb-item">Mem: {(stats.memUsedMB / 1024).toFixed(1)} GB</span>
-      <span className="sb-item">v1.0.8</span>
+      <span className="sb-item">{active ? <>Model <b className="sb-val">{active.label}</b></> : 'No model'}</span>
+      <span className="sb-item">CPU <b className="sb-val">{stats.cpu}%</b></span>
+      <span className="sb-item">Mem <b className="sb-val">{(stats.memUsedMB / 1024).toFixed(1)} GB</b></span>
+      <span className="sb-item sb-version">v{APP_VERSION}</span>
     </footer>
   )
 }

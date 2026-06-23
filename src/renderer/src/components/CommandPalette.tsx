@@ -29,6 +29,7 @@ export default function CommandPalette(): JSX.Element | null {
   const browseProject = useStore((s) => s.browseProject)
   const createWorkspaceFile = useStore((s) => s.createWorkspaceFile)
   const createWorkspaceFolder = useStore((s) => s.createWorkspaceFolder)
+  const prompt = useStore((s) => s.prompt)
   const toggleSettings = useStore((s) => s.toggleSettings)
   const toggleProfileSetup = useStore((s) => s.toggleProfileSetup)
   const toggleTasks = useStore((s) => s.toggleTasks)
@@ -123,8 +124,8 @@ export default function CommandPalette(): JSX.Element | null {
         label: 'New File',
         hint: 'workspace',
         keywords: 'new file create workspace',
-        run: () => {
-          const name = window.prompt('New file path')
+        run: async () => {
+          const name = await prompt({ title: 'New file', placeholder: 'name.ext', confirmLabel: 'Create' })
           if (name?.trim()) void createWorkspaceFile(name.trim())
         }
       },
@@ -134,8 +135,8 @@ export default function CommandPalette(): JSX.Element | null {
         label: 'New Folder',
         hint: 'workspace',
         keywords: 'new folder directory create workspace',
-        run: () => {
-          const name = window.prompt('New folder path')
+        run: async () => {
+          const name = await prompt({ title: 'New folder', placeholder: 'name', confirmLabel: 'Create' })
           if (name?.trim()) void createWorkspaceFolder(name.trim())
         }
       },

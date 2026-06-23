@@ -18,6 +18,12 @@ import { startChat, cancelChat, cancelAllChats } from './chat-manager'
 import { fetchGithubWork } from './github-service'
 import { listEmulators } from './emulator-manager'
 import {
+  computerUsePerform,
+  computerUseScreen,
+  computerUseScreenshot,
+  computerUseSetup
+} from './computer-use-manager'
+import {
   startMobileBridge,
   stopMobileBridge,
   mobileStatus,
@@ -26,6 +32,7 @@ import {
 import type {
   AttachmentSaveResult,
   ChatSendPayload,
+  ComputerUseAction,
   FolderScanResult,
   GithubFetchPayload,
   MobileContext,
@@ -39,7 +46,8 @@ import type {
   WorkspaceImageResult,
   WorkspaceOpenResult,
   WorkspaceReadResult,
-  WorkspaceWritePayload
+  WorkspaceWritePayload,
+  ProjectInfo
 } from '../shared/types'
 
 let mainWindow: BrowserWindow | null = null
@@ -268,6 +276,84 @@ async function readGitInfo(root: string): Promise<WorkspaceOpenResult['git'] | u
     }
   } catch {
     return undefined
+  }
+}
+
+/** Parse "owner/name" and owner login from a GitHub remote URL. */
+function parseGithubRemote(remoteUrl?: string): { repo?: string; owner?: string } {
+  if (!remoteUrl) return {}
+  const normalized = remoteUrl
+    .trim()
+    .replace(/^git@github\.com:/, '')
+    .replace(/^ssh:\/\/git@github\.com\//, '')
+    .replace(/^https?:\/\/github\.com\//, '')
+    .replace(/^github\.com\//, '')
+    .replace(/\.git$/, '')
+  const match = normalized.match(/^([^/]+)\/([^/]+)$/)
+  if (!match) return {}
+  return { repo: `${match[1]}/${match[2]}`, owner: match[1] }
+}
+
+/** Enumerate local and remote branch names from a repo's .git directory. */
+async function listGitBranches(gitDir: string): Promise<{ local: string[]; remote: string[] }> {
+  const local = new Set<string>()
+  const remote = new Set<string>()
+
+  const walk = async (base: string, prefix: string, set: Set<string>): Promise<void> => {
+    let entries: Dirent[]
+    try {
+      entries = await fs.readdir(base, { withFileTypes: true })
+    } catch {
+      return // refs dir missing (e.g. nothing committed yet)
+    }
+    for (const entry of entries) {
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name
+      if (entry.isDirectory()) await walk(join(base, entry.name), name, set)
+      else set.add(name)
+    }
+  }
+
+  await walk(join(gitDir, 'refs', 'heads'), '', local)
+  await walk(join(gitDir, 'refs', 'remotes'), '', remote)
+
+  // Branches packed into .git/packed-refs aren't on disk as loose files.
+  try {
+    const packed = await fs.readFile(join(gitDir, 'packed-refs'), 'utf8')
+    for (const line of packed.split('\n')) {
+      const match = line.match(/^[0-9a-f]+\s+refs\/(heads|remotes)\/(.+)$/)
+      if (!match) continue
+      ;(match[1] === 'heads' ? local : remote).add(match[2].trim())
+    }
+  } catch {
+    /* no packed-refs */
+  }
+
+  remote.delete('origin/HEAD') // symbolic pointer, not a real branch
+  const sort = (a: string, b: string): number => a.localeCompare(b)
+  return { local: [...local].sort(sort), remote: [...remote].sort(sort) }
+}
+
+async function readProjectInfo(path: string): Promise<ProjectInfo> {
+  const git = await readGitInfo(path)
+  if (!git) return { path, isGit: false, branches: [] }
+
+  const { local, remote } = await listGitBranches(join(path, '.git'))
+  const { repo, owner } = parseGithubRemote(git.remoteUrl)
+  const primaryBranch =
+    remote.find((b) => b === 'origin/main') ??
+    remote.find((b) => b === 'origin/master') ??
+    remote.find((b) => b.startsWith('origin/')) ??
+    (git.branch ? `origin/${git.branch}` : undefined)
+
+  return {
+    path,
+    isGit: true,
+    currentBranch: git.branch,
+    remoteUrl: git.remoteUrl,
+    repo,
+    owner,
+    primaryBranch,
+    branches: [...local, ...remote]
   }
 }
 
@@ -664,6 +750,8 @@ function registerIpc(): void {
     return openWorkspacePath(payload)
   })
 
+  ipcMain.handle('project:info', (_e, path: string): Promise<ProjectInfo> => readProjectInfo(path))
+
   // Pick a project folder and report which child folders look like separate
   // repos/projects, so the renderer can offer "import separately vs monorepo".
   ipcMain.handle('workspace:pick-folder', async (): Promise<FolderScanResult | null> => {
@@ -805,6 +893,15 @@ function registerIpc(): void {
   ipcMain.handle('mobile:stop', () => stopMobileBridge())
   ipcMain.handle('mobile:status', () => mobileStatus())
   ipcMain.on('mobile:context', (_e, ctx: MobileContext) => setMobileContext(ctx))
+
+  // Computer Use: capture the desktop and drive mouse/keyboard so a CLI agent
+  // (or the panel) can operate the machine. Windows-only in this build.
+  ipcMain.handle('computer-use:setup', () => computerUseSetup())
+  ipcMain.handle('computer-use:screen', () => computerUseScreen())
+  ipcMain.handle('computer-use:screenshot', () => computerUseScreenshot())
+  ipcMain.handle('computer-use:perform', (_e, action: ComputerUseAction) =>
+    computerUsePerform(action)
+  )
 
   ipcMain.on('win:minimize', (event) => BrowserWindow.fromWebContents(event.sender)?.minimize())
   ipcMain.on('win:maximize', (event) => {

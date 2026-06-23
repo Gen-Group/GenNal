@@ -9,6 +9,7 @@ import TasksPanel from './components/TasksPanel'
 import AutomationsPanel from './components/AutomationsPanel'
 import SessionHistoryPanel from './components/SessionHistoryPanel'
 import SimulatorsPanel from './components/SimulatorsPanel'
+import ComputerUsePanel from './components/ComputerUsePanel'
 import RightPanel from './components/RightPanel'
 import StatusBar from './components/StatusBar'
 import CommandPalette from './components/CommandPalette'
@@ -18,6 +19,7 @@ import AddModelDialog from './components/AddModelDialog'
 import MobileDialog from './components/MobileDialog'
 import ImagePreview from './components/ImagePreview'
 import ImportReposDialog from './components/ImportReposDialog'
+import PromptModal from './components/PromptModal'
 
 export default function App(): JSX.Element {
   const setModels = useStore((s) => s.setModels)
@@ -36,8 +38,15 @@ export default function App(): JSX.Element {
   const automationsOpen = useStore((s) => s.automationsOpen)
   const historyOpen = useStore((s) => s.historyOpen)
   const simulatorsOpen = useStore((s) => s.simulatorsOpen)
+  const computerUseOpen = useStore((s) => s.computerUseOpen)
   const previewCenter = useStore((s) => s.previewCenter)
   const tickAutomations = useStore((s) => s.tickAutomations)
+  const workspace = useStore((s) => s.workspace)
+  const sessions = useStore((s) => s.sessions)
+  // The terminal grid is only the visible center content when no feature panel
+  // and no centered browser preview is up; otherwise it stays mounted but hidden.
+  const workspaceVisible =
+    !tasksOpen && !automationsOpen && !historyOpen && !simulatorsOpen && !computerUseOpen && !previewCenter
   const bodyClasses = [
     'body',
     `panel-${panelSide}`,
@@ -63,6 +72,16 @@ export default function App(): JSX.Element {
   useEffect(() => {
     if (restoreWorkspaceOnLaunch) void restoreWorkspace()
   }, [restoreWorkspace, restoreWorkspaceOnLaunch])
+
+  // Keep the mobile bridge's view of the open project + terminals fresh. The
+  // server can run in the background (after the QR dialog closes), so push this
+  // whenever the workspace or sessions change — it's a no-op when sharing is off.
+  useEffect(() => {
+    window.api.mobile.setContext({
+      cwd: workspace?.kind === 'project' ? workspace.path : undefined,
+      panes: sessions.map((s) => ({ id: s.id, label: s.label, tag: s.tag }))
+    })
+  }, [workspace, sessions])
 
   // Background scheduler: fire any due automations while the app is open.
   useEffect(() => {
@@ -114,6 +133,11 @@ export default function App(): JSX.Element {
         {sidebarOpen && <Sidebar />}
         {panelSide === 'left' && panelOpen && <RightPanel />}
         <main className="center">
+          {/* Feature panels and the centered browser preview overlay the
+              workspace, but the workspace (terminal grid) stays mounted at all
+              times so its live ptys are never killed. Unmounting PaneGrid would
+              run every ModelPane's cleanup (ptyKill + term.dispose), which is
+              why switching to a feature and back used to reset all terminals. */}
           {tasksOpen ? (
             <TasksPanel />
           ) : automationsOpen ? (
@@ -122,12 +146,20 @@ export default function App(): JSX.Element {
             <SessionHistoryPanel />
           ) : simulatorsOpen ? (
             <SimulatorsPanel />
+          ) : computerUseOpen ? (
+            <ComputerUsePanel />
           ) : (
             <>
               <LayoutToolbar />
-              {previewCenter ? <BrowserPreview active center /> : <PaneGrid />}
+              {previewCenter && <BrowserPreview active center />}
             </>
           )}
+          <div
+            className="workspace-host"
+            style={{ display: workspaceVisible ? undefined : 'none' }}
+          >
+            <PaneGrid />
+          </div>
         </main>
         {panelSide === 'right' && panelOpen && <RightPanel />}
       </div>
@@ -139,6 +171,7 @@ export default function App(): JSX.Element {
       <MobileDialog />
       <ImagePreview />
       <ImportReposDialog />
+      <PromptModal />
     </div>
   )
 }

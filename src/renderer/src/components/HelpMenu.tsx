@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { APP_VERSION } from '../version'
 
-const APP_VERSION = '1.0.8'
 const REPO = 'https://github.com/Gen-Group/GenNal'
 const GITHUB_PROFILE = 'https://github.com/chydevit'
 

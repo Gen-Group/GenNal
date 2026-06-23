@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useStore } from '../store'
-
-const ACCENT_SWATCHES = ['#A78BFA', '#D97757', '#10A37F', '#4285F4', '#22c55e', '#f97316', '#ec4899', '#14b8a6']
+import Modal from './Modal'
+import { ACCENT_SWATCHES } from '../accents'
 
 export default function AddModelDialog(): JSX.Element | null {
   const open = useStore((s) => s.addModelOpen)
@@ -35,12 +35,18 @@ export default function AddModelDialog(): JSX.Element | null {
   }
 
   return (
-    <div className="profile-overlay" onMouseDown={() => toggleAddModel(false)}>
-      <form className="profile-dialog" onMouseDown={(e) => e.stopPropagation()} onSubmit={submit}>
+    <Modal onClose={() => toggleAddModel(false)}>
+      <form
+        className="profile-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="addmodel-title"
+        onSubmit={submit}
+      >
         <div className="profile-dialog-head">
           <span className="addmodel-swatch" style={{ background: accent }} aria-hidden="true" />
           <div>
-            <h2>Add a model</h2>
+            <h2 id="addmodel-title">Add a model</h2>
             <p>Launch any CLI as a model session. The command runs in a new terminal.</p>
           </div>
         </div>
@@ -114,6 +120,6 @@ export default function AddModelDialog(): JSX.Element | null {
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   )
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { useStore } from '../store'
+import Modal from './Modal'
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024 // 2 MB
 
@@ -70,8 +71,14 @@ export default function ProfileDialog(): JSX.Element | null {
   }
 
   return (
-    <div className="profile-overlay" onMouseDown={dismiss}>
-      <form className="profile-dialog" onMouseDown={(e) => e.stopPropagation()} onSubmit={submit}>
+    <Modal onClose={dismiss} dismissable={!firstRun}>
+      <form
+        className="profile-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="profile-title"
+        onSubmit={submit}
+      >
         <div className="profile-dialog-head">
           <div className="profile-avatar-edit">
             <button
@@ -99,7 +106,7 @@ export default function ProfileDialog(): JSX.Element | null {
             )}
           </div>
           <div>
-            <h2>{firstRun ? 'Welcome to GenNal' : 'Edit profile'}</h2>
+            <h2 id="profile-title">{firstRun ? 'Welcome to GenNal' : 'Edit profile'}</h2>
             <p>{firstRun ? 'Add your name to get started.' : 'Update how you appear in GenNal.'}</p>
             {avatarError && <p className="profile-avatar-error">{avatarError}</p>}
           </div>
@@ -144,6 +151,6 @@ export default function ProfileDialog(): JSX.Element | null {
           </button>
         </div>
       </form>
-    </div>
+    </Modal>
   )
 }

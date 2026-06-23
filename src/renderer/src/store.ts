@@ -162,6 +162,8 @@ export interface NotificationSettings {
   enabled: boolean
   agentTaskComplete: boolean
   terminalBell: boolean
+  /** Play a sound when an AI run finishes (detected via the completion bell). */
+  runCompleteSound: boolean
   sound: NotificationSound
   suppressWhileFocused: boolean
 }
@@ -173,10 +175,51 @@ export interface ImagePreview {
   size: number
 }
 
+/** A themed in-app replacement for window.prompt(). */
+export interface PromptRequest {
+  title: string
+  label?: string
+  placeholder?: string
+  initialValue?: string
+  confirmLabel?: string
+  resolve: (value: string | null) => void
+}
+
+export interface PromptOptions {
+  title: string
+  label?: string
+  placeholder?: string
+  initialValue?: string
+  confirmLabel?: string
+}
+
 /** A project folder the user has opened, kept so it can be reopened quickly. */
 export interface RecentProject {
   path: string
   name: string
+}
+
+export type ProjectIconMode = 'avatar' | 'icon' | 'emoji'
+export type ProjectRuntime = 'default' | 'windows' | 'wsl'
+
+/** User-chosen appearance & runtime overrides for a single project. */
+export interface ProjectSettings {
+  /** Override for the displayed name (falls back to the folder name). */
+  displayName?: string
+  /** Accent color for the project's monogram/icon. */
+  color?: string
+  /** Which icon style to show. */
+  iconMode?: ProjectIconMode
+  /** Emoji shown when iconMode === 'emoji'. */
+  emoji?: string
+  /** Preset icon name shown when iconMode === 'icon'. */
+  icon?: string
+  /** Avatar/favicon/uploaded image (URL or data URL) shown when iconMode === 'avatar'. */
+  image?: string
+  /** Terminal/agent runtime for this project. */
+  runtime?: ProjectRuntime
+  /** Branch new worktrees are based on, e.g. "origin/main". */
+  worktreeBase?: string
 }
 
 export interface ApplyCodeResult {
@@ -302,6 +345,8 @@ interface AppState {
   historyOpen: boolean
   /** Mobile Simulators (Android AVD / iOS Simulator) launcher panel is open. */
   simulatorsOpen: boolean
+  /** Computer Use (AI desktop control) panel is open. */
+  computerUseOpen: boolean
   /** GenNal Mobile pairing dialog (QR code) is open. */
   mobileOpen: boolean
   githubToken: string
@@ -319,9 +364,13 @@ interface AppState {
   workspace: WorkspaceOpenResult | null
   workspaceError: string | null
   recentProjects: RecentProject[]
+  /** Per-project appearance & runtime overrides, keyed by lowercased path. */
+  projectSettings: Record<string, ProjectSettings>
   /** Pending "import repositories from folder" dialog data (null = closed). */
   importRepos: FolderScanResult | null
   imagePreview: ImagePreview | null
+  /** Pending themed-prompt request (null = no prompt open). */
+  promptRequest: PromptRequest | null
   runOutput: RunOutput[]
   running: boolean
   /** URL currently loaded in the in-app website preview (null = home page). */
@@ -361,6 +410,9 @@ interface AppState {
   toggleSimulators: (v?: boolean) => void
   /** Boot an emulator/simulator into a new managed terminal pane. */
   bootSimulator: (emulator: EmulatorInfo) => void
+  toggleComputerUse: (v?: boolean) => void
+  /** Launch an AI CLI terminal primed to control the desktop via the tool. */
+  startComputerUseSession: (modelId: string, toolPath: string) => void
   toggleMobile: (v?: boolean) => void
   setGithubToken: (token: string) => void
   addAutomationFromTemplate: (template: AutomationTemplate) => string
@@ -391,6 +443,8 @@ interface AppState {
   importAsMonorepo: (name?: string) => Promise<void>
   dismissImportRepos: () => void
   removeRecentProject: (path: string) => void
+  /** Merge a patch into a project's saved appearance/runtime settings. */
+  setProjectSettings: (path: string, patch: Partial<ProjectSettings>) => void
   restoreWorkspace: () => Promise<void>
   clearWorkspace: () => void
   openWorkspaceFile: (file: WorkspaceFile) => Promise<void>
@@ -398,6 +452,9 @@ interface AppState {
   createWorkspaceFolder: (relativePath: string) => Promise<void>
   openImagePreview: (file: WorkspaceFile) => Promise<void>
   closeImagePreview: () => void
+  /** Open a themed prompt; resolves with the trimmed value or null if cancelled. */
+  prompt: (options: PromptOptions) => Promise<string | null>
+  resolvePrompt: (value: string | null) => void
   updateWorkspaceContent: (content: string) => void
   saveWorkspaceFile: (content: string) => Promise<boolean>
   runFile: () => Promise<void>
@@ -533,6 +590,28 @@ function loadRecentProjects(): RecentProject[] {
 function saveRecentProjects(projects: RecentProject[]): void {
   try {
     window.localStorage.setItem(RECENT_PROJECTS_STORAGE, JSON.stringify(projects.slice(0, MAX_RECENT_PROJECTS)))
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+const PROJECT_SETTINGS_STORAGE = 'gennal.projectSettings'
+
+function loadProjectSettings(): Record<string, ProjectSettings> {
+  try {
+    const raw = window.localStorage.getItem(PROJECT_SETTINGS_STORAGE)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object') return {}
+    return parsed as Record<string, ProjectSettings>
+  } catch {
+    return {}
+  }
+}
+
+function saveProjectSettings(settings: Record<string, ProjectSettings>): void {
+  try {
+    window.localStorage.setItem(PROJECT_SETTINGS_STORAGE, JSON.stringify(settings))
   } catch {
     /* ignore storage errors */
   }
@@ -742,6 +821,7 @@ const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   enabled: true,
   agentTaskComplete: true,
   terminalBell: false,
+  runCompleteSound: true,
   sound: 'system',
   suppressWhileFocused: true
 }
@@ -912,6 +992,7 @@ function loadNotificationSettings(): NotificationSettings {
       enabled: bool('enabled'),
       agentTaskComplete: bool('agentTaskComplete'),
       terminalBell: bool('terminalBell'),
+      runCompleteSound: bool('runCompleteSound'),
       sound: NOTIFICATION_SOUNDS.includes(parsed.sound as NotificationSound)
         ? (parsed.sound as NotificationSound)
         : DEFAULT_NOTIFICATION_SETTINGS.sound,
@@ -982,6 +1063,23 @@ function createSession(model: ModelDef, index: number, cwd?: string, projectPath
   }
 }
 
+/**
+ * A single-line desktop-control briefing typed into a fresh AI CLI session as
+ * its first message. Single line on purpose: the session action appends a
+ * carriage return, so any embedded newline would submit the prompt early.
+ */
+export function computerUseBriefing(toolPath: string): string {
+  const t = `& "${toolPath}"`
+  return (
+    'You can now control this Windows desktop through a tool. In PowerShell run ' +
+    `${t} <command>. Commands: ${t} screenshot (saves a PNG and prints its absolute path — read that image to see the screen); ` +
+    `${t} size; ${t} cursor; ${t} move X Y; ${t} click [X Y] [left|right|middle]; ${t} doubleclick [X Y]; ` +
+    `${t} type TEXT (Windows SendKeys syntax); ${t} key {ENTER} (also ^c for Ctrl+C, %{F4} for Alt+F4); ${t} scroll N. ` +
+    'Work in a loop: screenshot, read it, decide one action, perform it, then screenshot again to verify. ' +
+    'Begin by taking a screenshot and describing what you see, then wait for my task before doing anything irreversible.'
+  )
+}
+
 /** The active project's path, or `undefined` when a file / no workspace is open. */
 export function activeProjectPath(workspace: WorkspaceOpenResult | null): string | undefined {
   return workspace?.kind === 'project' ? workspace.path : undefined
@@ -1024,6 +1122,7 @@ export const useStore = create<AppState>((set, get) => ({
   automationsOpen: false,
   historyOpen: false,
   simulatorsOpen: false,
+  computerUseOpen: false,
   githubToken: loadGithubToken(),
   automations: loadAutomations(),
   automationRuns: loadAutomationRuns(),
@@ -1039,8 +1138,10 @@ export const useStore = create<AppState>((set, get) => ({
   workspace: null,
   workspaceError: null,
   recentProjects: loadRecentProjects(),
+  projectSettings: loadProjectSettings(),
   importRepos: null,
   imagePreview: null,
+  promptRequest: null,
   runOutput: [],
   running: false,
   previewUrl: null,
@@ -1178,29 +1279,36 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => {
       const tasksOpen = v ?? !s.tasksOpen
       return tasksOpen
-        ? { tasksOpen, automationsOpen: false, historyOpen: false, simulatorsOpen: false }
+        ? { tasksOpen, automationsOpen: false, historyOpen: false, simulatorsOpen: false, computerUseOpen: false }
         : { tasksOpen }
     }),
   toggleAutomations: (v) =>
     set((s) => {
       const automationsOpen = v ?? !s.automationsOpen
       return automationsOpen
-        ? { automationsOpen, tasksOpen: false, historyOpen: false, simulatorsOpen: false }
+        ? { automationsOpen, tasksOpen: false, historyOpen: false, simulatorsOpen: false, computerUseOpen: false }
         : { automationsOpen }
     }),
   toggleHistory: (v) =>
     set((s) => {
       const historyOpen = v ?? !s.historyOpen
       return historyOpen
-        ? { historyOpen, tasksOpen: false, automationsOpen: false, simulatorsOpen: false }
+        ? { historyOpen, tasksOpen: false, automationsOpen: false, simulatorsOpen: false, computerUseOpen: false }
         : { historyOpen }
     }),
   toggleSimulators: (v) =>
     set((s) => {
       const simulatorsOpen = v ?? !s.simulatorsOpen
       return simulatorsOpen
-        ? { simulatorsOpen, tasksOpen: false, automationsOpen: false, historyOpen: false }
+        ? { simulatorsOpen, tasksOpen: false, automationsOpen: false, historyOpen: false, computerUseOpen: false }
         : { simulatorsOpen }
+    }),
+  toggleComputerUse: (v) =>
+    set((s) => {
+      const computerUseOpen = v ?? !s.computerUseOpen
+      return computerUseOpen
+        ? { computerUseOpen, tasksOpen: false, automationsOpen: false, historyOpen: false, simulatorsOpen: false }
+        : { computerUseOpen }
     }),
   bootSimulator: (emulator) =>
     set((s) => {
@@ -1226,6 +1334,24 @@ export const useStore = create<AppState>((set, get) => ({
         simulatorsOpen: false
       }
     }),
+  startComputerUseSession: (modelId, toolPath) => {
+    const state = get()
+    const model = state.models.find((m) => m.id === modelId) ?? state.models.find((m) => m.id !== 'custom')
+    if (!model) return
+    const projectPath = activeProjectPath(state.workspace)
+    const session = createSession(model, state.sessions.length, projectPath, projectPath)
+    set((s) => ({
+      sessions: [...s.sessions, session],
+      activeId: session.id,
+      computerUseOpen: false
+    }))
+    // Give the CLI a moment to boot, then hand it the desktop-control briefing
+    // as its first message so it knows the tool exists and how to drive it.
+    const briefing = computerUseBriefing(toolPath)
+    window.setTimeout(() => {
+      window.api.ptyInput(session.id, briefing + '\r')
+    }, 1400)
+  },
   addAutomationFromTemplate: (template) => {
     const id = uidPrefixed('auto_')
     const models = get().models
@@ -1508,7 +1634,7 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {
       /* ignore storage errors */
     }
-    set({ workspace: null, workspaceError: null, recentProjects: [], imagePreview: null, runOutput: [], chatHistory: [] })
+    set({ workspace: null, workspaceError: null, recentProjects: [], projectSettings: {}, imagePreview: null, runOutput: [], chatHistory: [] })
   },
 
   addChatHistoryEntry: (entry) => {
@@ -1623,7 +1749,20 @@ export const useStore = create<AppState>((set, get) => ({
       const key = path.toLowerCase()
       const recentProjects = s.recentProjects.filter((p) => p.path.toLowerCase() !== key)
       saveRecentProjects(recentProjects)
-      return { recentProjects }
+      const projectSettings = { ...s.projectSettings }
+      delete projectSettings[key]
+      saveProjectSettings(projectSettings)
+      return { recentProjects, projectSettings }
+    })
+  },
+
+  setProjectSettings: (path, patch) => {
+    set((s) => {
+      const key = path.toLowerCase()
+      const next: ProjectSettings = { ...s.projectSettings[key], ...patch }
+      const projectSettings = { ...s.projectSettings, [key]: next }
+      saveProjectSettings(projectSettings)
+      return { projectSettings }
     })
   },
 
@@ -1741,6 +1880,20 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   closeImagePreview: () => set({ imagePreview: null }),
+
+  prompt: (options) =>
+    new Promise<string | null>((resolve) => {
+      // If a prompt is already open, cancel it so we never strand a resolver.
+      const existing = get().promptRequest
+      if (existing) existing.resolve(null)
+      set({ promptRequest: { ...options, resolve } })
+    }),
+  resolvePrompt: (value) => {
+    const req = get().promptRequest
+    if (!req) return
+    set({ promptRequest: null })
+    req.resolve(value)
+  },
 
   updateWorkspaceContent: (content) =>
     set((s) => (s.workspace ? { workspace: { ...s.workspace, content } } : s)),

@@ -11,7 +11,9 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { useStore, scrollbackLines, windowsShellCommand, activeProjectPath } from '../store'
+import { isLocalhostUrl } from '../preview-links'
 import TerminalFindBar from './TerminalFindBar'
+import { getTerminalTheme } from '../theme-colors'
 
 // A single dedicated shell that lives in the right panel's TERMINAL tab.
 // Reuses the same PTY bridge as the model panes; an empty command spawns a
@@ -20,7 +22,6 @@ const PANEL_TERM_ID = 'gennal-panel-terminal'
 
 interface AttachmentNotice {
   name: string
-  src: string
 }
 
 type DroppedFile = File & { path?: string }
@@ -57,6 +58,7 @@ export default function PanelTerminal({
   // URL currently under the mouse, so a right-click can open it in the preview.
   const hoveredUrlRef = useRef<string | null>(null)
   const terminalSettings = useStore((s) => s.terminalSettings)
+  const theme = useStore((s) => s.theme)
   const settingsRef = useRef(terminalSettings)
   useEffect(() => {
     settingsRef.current = terminalSettings
@@ -74,12 +76,7 @@ export default function PanelTerminal({
       cursorBlink: terminalSettings.cursorBlink,
       scrollback: scrollbackLines(terminalSettings),
       wordSeparator: terminalSettings.wordSeparators,
-      theme: {
-        background: '#0c0e16',
-        foreground: '#d7dae6',
-        cursor: '#7c5cff',
-        selectionBackground: '#7c5cff44'
-      }
+      theme: getTerminalTheme()
     })
     terminalRef.current = term
 
@@ -91,10 +88,13 @@ export default function PanelTerminal({
     term.loadAddon(search)
     searchRef.current = search
 
-    // Make URLs clickable: open in the in-app website preview, and track the
-    // hovered URL so a right-click can open it too.
+    // Make URLs clickable: localhost dev servers open in the in-app preview,
+    // everything else in the system browser. Track the hovered URL so a
+    // right-click can open it too.
     const openUrl = (uri: string): void => {
-      if (/^https?:\/\//i.test(uri)) useStore.getState().openPreview(uri)
+      if (!/^https?:\/\//i.test(uri)) return
+      if (isLocalhostUrl(uri)) useStore.getState().openPreview(uri)
+      else window.api.openExternal(uri)
     }
     term.loadAddon(
       new WebLinksAddon((_event, uri) => openUrl(uri), {
@@ -206,6 +206,12 @@ export default function PanelTerminal({
     term.options.wordSeparator = terminalSettings.wordSeparators
   }, [terminalSettings])
 
+  // Re-theme the live terminal on app theme change (no recreate → pty survives).
+  useEffect(() => {
+    const term = terminalRef.current
+    if (term) term.options.theme = getTerminalTheme()
+  }, [theme])
+
   useEffect(() => {
     return () => {
       if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current)
@@ -233,9 +239,9 @@ export default function PanelTerminal({
       )
       if (!attachment) return
       insertAttachmentPath(attachment.path)
-      showAttachmentNotice({ name: attachment.name, src: attachment.dataUrl })
+      showAttachmentNotice({ name: attachment.name })
     } catch {
-      showAttachmentNotice({ name: 'Unable to attach clipboard image', src: '' })
+      showAttachmentNotice({ name: 'Unable to attach clipboard image' })
     }
   }
 
@@ -299,9 +305,7 @@ export default function PanelTerminal({
     e.preventDefault()
     e.stopPropagation()
     insertAttachmentPath(file.path)
-    const src = URL.createObjectURL(file)
-    showAttachmentNotice({ name: file.name, src })
-    window.setTimeout(() => URL.revokeObjectURL(src), 3500)
+    showAttachmentNotice({ name: file.name })
   }
 
   const onDragOver = (e: ReactDragEvent<HTMLDivElement>): void => {
@@ -312,12 +316,16 @@ export default function PanelTerminal({
   }
 
   const onContextMenu = (e: ReactMouseEvent<HTMLDivElement>): void => {
-    // Right-clicking a URL opens it in the in-app website preview.
+    // Right-clicking a URL opens it (localhost in the in-app preview, others in
+    // the system browser).
     const url = hoveredUrlRef.current
     if (url && !e.ctrlKey) {
       e.preventDefault()
       window.api.suppressNextContextMenu()
-      if (/^https?:\/\//i.test(url)) useStore.getState().openPreview(url)
+      if (/^https?:\/\//i.test(url)) {
+        if (isLocalhostUrl(url)) useStore.getState().openPreview(url)
+        else window.api.openExternal(url)
+      }
       return
     }
     // Ctrl+right-click falls through to the native Cut/Copy/Paste menu.
@@ -381,11 +389,11 @@ export default function PanelTerminal({
       )}
       {attachmentNotice && (
         <div className="rp-attachment" role="status">
-          {attachmentNotice.src ? (
-            <img src={attachmentNotice.src} alt="" />
-          ) : (
-            <span className="rp-attachment-icon" aria-hidden="true">!</span>
-          )}
+          <span className="rp-attachment-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+            </svg>
+          </span>
           <span title={attachmentNotice.name}>{attachmentNotice.name}</span>
         </div>
       )}

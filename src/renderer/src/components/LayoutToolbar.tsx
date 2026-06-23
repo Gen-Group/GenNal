@@ -2,12 +2,67 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore, type LayoutMode } from '../store'
 import ModelMenu from './ModelMenu'
 
-const MODES: { id: LayoutMode; label: string; icon: string }[] = [
-  { id: 'grid', label: 'Grid', icon: '▦' },
-  { id: 'tabs', label: 'Tabs', icon: '▭' },
-  { id: 'stack', label: 'Stack', icon: '☰' },
-  { id: 'float', label: 'Float', icon: '◳' }
+const MODES: { id: LayoutMode; label: string }[] = [
+  { id: 'grid', label: 'Grid' },
+  { id: 'tabs', label: 'Tabs' },
+  { id: 'stack', label: 'Stack' },
+  { id: 'float', label: 'Float' }
 ]
+
+const svgProps = {
+  viewBox: '0 0 16 16',
+  width: 15,
+  height: 15,
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.4,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true
+}
+
+function ModeIcon({ id }: { id: LayoutMode | 'sessions' | 'preview' }): JSX.Element {
+  switch (id) {
+    case 'grid':
+    case 'sessions':
+      return (
+        <svg {...svgProps}>
+          <rect x="2" y="2" width="5" height="5" rx="1" />
+          <rect x="9" y="2" width="5" height="5" rx="1" />
+          <rect x="2" y="9" width="5" height="5" rx="1" />
+          <rect x="9" y="9" width="5" height="5" rx="1" />
+        </svg>
+      )
+    case 'tabs':
+      return (
+        <svg {...svgProps}>
+          <rect x="2" y="3" width="12" height="10" rx="1.5" />
+          <path d="M2 6h12M6 3v3" />
+        </svg>
+      )
+    case 'stack':
+      return (
+        <svg {...svgProps}>
+          <rect x="2" y="2.5" width="12" height="4" rx="1" />
+          <rect x="2" y="9.5" width="12" height="4" rx="1" />
+        </svg>
+      )
+    case 'float':
+      return (
+        <svg {...svgProps}>
+          <rect x="2" y="2" width="8" height="8" rx="1" />
+          <rect x="6" y="6" width="8" height="8" rx="1" />
+        </svg>
+      )
+    case 'preview':
+      return (
+        <svg {...svgProps}>
+          <circle cx="8" cy="8" r="6" />
+          <path d="M2 8h12M8 2c2 2 2 10 0 12M8 2c-2 2-2 10 0 12" />
+        </svg>
+      )
+  }
+}
 
 type GridMenu = 'rows' | 'cols' | null
 
@@ -60,9 +115,12 @@ export default function LayoutToolbar(): JSX.Element {
             <button
               key={m.id}
               className={`seg-btn ${mode === m.id ? 'active' : ''}`}
+              aria-pressed={mode === m.id}
               onClick={() => setMode(m.id)}
             >
-              <span className="seg-ico">{m.icon}</span>
+              <span className="seg-ico">
+                <ModeIcon id={m.id} />
+              </span>
               {m.label}
             </button>
           ))}
@@ -72,17 +130,23 @@ export default function LayoutToolbar(): JSX.Element {
       <div className="seg">
         <button
           className={`seg-btn ${previewCenter ? '' : 'active'}`}
+          aria-pressed={!previewCenter}
           onClick={() => setPreviewCenter(false)}
         >
-          <span className="seg-ico">▦</span>
+          <span className="seg-ico">
+            <ModeIcon id="sessions" />
+          </span>
           Sessions
         </button>
         <button
           className={`seg-btn ${previewCenter ? 'active' : ''}`}
           title="Show the website preview on the main screen"
+          aria-pressed={previewCenter}
           onClick={() => setPreviewCenter(true)}
         >
-          <span className="seg-ico">🌐</span>
+          <span className="seg-ico">
+            <ModeIcon id="preview" />
+          </span>
           Preview
         </button>
       </div>

@@ -144,6 +144,10 @@ export default function UsageDetail({ model, onBack, onConnect }: Props): JSX.El
         <>
           {usage?.limits && usage.limits.length > 0 && (
             <div className="usage-limits">
+              <div className="usage-limits-head">
+                <span className="usage-limits-title">Plan usage limits</span>
+                {account?.plan && <span className="usage-plan-pill">{account.plan}</span>}
+              </div>
               {usage.limits.map((l) => {
                 const pct = Math.max(0, Math.min(100, Math.round(l.usedPercent)))
                 const tone = limitTone(pct)

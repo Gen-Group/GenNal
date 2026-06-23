@@ -238,9 +238,23 @@ export interface MobileContext {
   panes: MobilePane[]
 }
 
+/** A phone currently connected to the mobile bridge. */
+export interface MobileDevice {
+  /** Stable id for the live connection (derived from address + user agent). */
+  id: string
+  /** Friendly name derived from the device's user agent, e.g. "iPhone". */
+  name: string
+  /** The device's address on the local network. */
+  ip: string
+  /** When the device first connected (epoch ms). */
+  connectedAt: number
+}
+
 /** State of the mobile bridge server, returned to the renderer. */
 export interface MobileStatus {
   running: boolean
+  /** Phones currently connected to the bridge, newest first. */
+  devices?: MobileDevice[]
   /** Full URL encoded in the QR code, including the pairing token. */
   url?: string
   /** Same URL without the token, for display. */
@@ -352,6 +366,8 @@ export interface AgentSessionSummary {
   messageCount: number
   /** Total tokens attributed to the session (cumulative, incl. cache). */
   tokens: number
+  /** Estimated USD cost of the session (token usage × model pricing). */
+  cost: number
   /** ISO timestamp of the latest activity in the session. */
   updatedAt: string
   /** Absolute path to the source log file. */
@@ -364,4 +380,67 @@ export interface AgentSessionHistory {
   scanned: number
   /** The cap applied to the most-recent files (e.g. 500). */
   recent: number
+}
+
+// ---- Computer Use (AI desktop control) -------------------------------------
+
+export type ComputerUseButton = 'left' | 'right' | 'middle'
+
+/** A captured desktop screenshot, with the on-disk path the CLI agent reads. */
+export interface ComputerUseScreenshot {
+  /** Absolute path to the saved PNG (handed to the model as vision input). */
+  path: string
+  /** data: URL for showing the shot in the panel preview. */
+  dataUrl: string
+  width: number
+  height: number
+}
+
+export interface ComputerUseScreen {
+  width: number
+  height: number
+}
+
+/** One desktop control action the renderer/agent can request. */
+export type ComputerUseAction =
+  | { kind: 'move'; x: number; y: number }
+  | { kind: 'click'; x?: number; y?: number; button?: ComputerUseButton }
+  | { kind: 'doubleclick'; x?: number; y?: number }
+  | { kind: 'type'; text: string }
+  | { kind: 'key'; keys: string }
+  | { kind: 'scroll'; amount: number }
+
+export interface ComputerUseResult {
+  ok: boolean
+  message?: string
+}
+
+/** Where the desktop-control tool lives and whether this OS supports it. */
+export interface ComputerUseSetup {
+  /** Absolute path to the gennal-computer wrapper the CLI agent runs. */
+  toolPath: string
+  /** Directory holding the tool and captured screenshots. */
+  dir: string
+  /** True when desktop control is supported here (Windows only for now). */
+  supported: boolean
+  platform: string
+}
+
+/** Facts read from disk for a project, used by the Project Settings page. */
+export interface ProjectInfo {
+  path: string
+  /** True when the folder is a git repository. */
+  isGit: boolean
+  /** Current checked-out branch, when a git repo. */
+  currentBranch?: string
+  /** origin remote URL, when configured. */
+  remoteUrl?: string
+  /** "owner/name" parsed from a GitHub remote, when applicable. */
+  repo?: string
+  /** GitHub owner login — used for the avatar (https://github.com/<owner>.png). */
+  owner?: string
+  /** Primary upstream branch (e.g. "origin/main"), when derivable. */
+  primaryBranch?: string
+  /** All branch names: local first, then remotes (e.g. "origin/main"). */
+  branches: string[]
 }

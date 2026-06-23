@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
 import { useStore } from '../store'
+import Modal from './Modal'
 
 function formatSize(bytes: number): string {
   if (!bytes) return ''
@@ -12,22 +12,13 @@ export default function ImagePreview(): JSX.Element | null {
   const preview = useStore((s) => s.imagePreview)
   const closeImagePreview = useStore((s) => s.closeImagePreview)
 
-  useEffect(() => {
-    if (!preview) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') closeImagePreview()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [preview, closeImagePreview])
-
   if (!preview) return null
 
   const size = formatSize(preview.size)
 
   return (
-    <div className="imgpv-overlay" onMouseDown={closeImagePreview}>
-      <div className="imgpv-dialog" onMouseDown={(e) => e.stopPropagation()}>
+    <Modal onClose={closeImagePreview} overlayClassName="modal-roomy">
+      <div className="imgpv-dialog" role="dialog" aria-modal="true" aria-label={preview.name}>
         <div className="imgpv-head">
           <div className="imgpv-meta">
             <span className="imgpv-name" title={preview.relativePath}>{preview.name}</span>
@@ -43,6 +34,6 @@ export default function ImagePreview(): JSX.Element | null {
           <img src={preview.src} alt={preview.name} />
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }

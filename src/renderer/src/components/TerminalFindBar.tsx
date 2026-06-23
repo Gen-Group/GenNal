@@ -1,12 +1,17 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { SearchAddon, ISearchOptions } from '@xterm/addon-search'
+import { resolveToken } from '../theme-colors'
 
 // Highlight colors for matches in the terminal viewport + overview ruler.
-const DECORATIONS: ISearchOptions['decorations'] = {
-  matchBackground: '#7c5cff55',
-  matchOverviewRuler: '#7c5cff',
-  activeMatchBackground: '#f5c84c88',
-  activeMatchColorOverviewRuler: '#f5c84c'
+// Match highlight follows the theme accent; the active match keeps a fixed amber
+// so it stays distinct from the accent-tinted matches in every theme.
+function buildDecorations(): ISearchOptions['decorations'] {
+  return {
+    matchBackground: resolveToken('var(--accent-strong)'),
+    matchOverviewRuler: resolveToken('var(--accent)'),
+    activeMatchBackground: 'rgba(245, 200, 76, 0.55)',
+    activeMatchColorOverviewRuler: '#f5c84c'
+  }
 }
 
 // A find-in-terminal bar (Ctrl/Cmd+F) that drives an xterm SearchAddon. Renders
@@ -22,10 +27,11 @@ export default function TerminalFindBar({
   const [query, setQuery] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [count, setCount] = useState<{ current: number; total: number } | null>(null)
+  const decorations = useMemo(buildDecorations, [])
 
   const options = (): ISearchOptions => ({
     caseSensitive,
-    decorations: DECORATIONS
+    decorations
   })
 
   useEffect(() => {
