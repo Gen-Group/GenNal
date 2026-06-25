@@ -7,7 +7,8 @@ import {
   type PointerEvent as ReactPointerEvent,
   type UIEvent
 } from 'react'
-import { useStore, type CodePanelTab } from '../store'
+import { useStore, activeProjectPath, type CodePanelTab } from '../store'
+import type { EmulatorInfo, EmulatorList } from '../../../shared/types'
 import PanelTerminal from './PanelTerminal'
 import ChatPanel from './ChatPanel'
 import BrowserPreview from './BrowserPreview'
@@ -101,7 +102,17 @@ export default function RightPanel(): JSX.Element {
   const runFile = useStore((s) => s.runFile)
   const stopRun = useStore((s) => s.stopRun)
   const clearRunOutput = useStore((s) => s.clearRunOutput)
+  const projectScripts = useStore((s) => s.projectScripts)
+  const scriptManager = useStore((s) => s.scriptManager)
+  const runScript = useStore((s) => s.runScript)
+  const loadProjectScripts = useStore((s) => s.loadProjectScripts)
+  const bootSimulator = useStore((s) => s.bootSimulator)
+  const toggleSimulators = useStore((s) => s.toggleSimulators)
   const editorSettings = useStore((s) => s.editorSettings)
+  const [runMenuOpen, setRunMenuOpen] = useState(false)
+  const [emulators, setEmulators] = useState<EmulatorList | null>(null)
+  const [emulatorsLoading, setEmulatorsLoading] = useState(false)
+  const scriptsRef = useRef<HTMLDivElement>(null)
   const outputRef = useRef<HTMLDivElement>(null)
   const autoSaveDirtyRef = useRef(false)
   const autoSavePathRef = useRef<string | undefined>(undefined)
@@ -167,6 +178,62 @@ export default function RightPanel(): JSX.Element {
     setCodeTab('OUTPUT')
     void runFile()
   }
+
+  // Reload the project's package.json scripts whenever the open project changes.
+  const projectPath = activeProjectPath(workspace)
+  useEffect(() => {
+    void loadProjectScripts(projectPath)
+  }, [projectPath, loadProjectScripts])
+
+  // Close the run menu on an outside click.
+  useEffect(() => {
+    if (!runMenuOpen) return
+    const onDown = (e: MouseEvent): void => {
+      if (!scriptsRef.current?.contains(e.target as Node)) setRunMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [runMenuOpen])
+
+  // Discover bootable simulators the first time the run menu opens (and refresh
+  // each open) so "Run on a simulator" lists the real devices on this machine.
+  useEffect(() => {
+    if (!runMenuOpen) return
+    let cancelled = false
+    setEmulatorsLoading(true)
+    void window.api.emulators
+      .list()
+      .then((list) => {
+        if (!cancelled) setEmulators(list)
+      })
+      .catch(() => {
+        if (!cancelled) setEmulators(null)
+      })
+      .finally(() => {
+        if (!cancelled) setEmulatorsLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [runMenuOpen])
+
+  const handleRunScript = (name: string): void => {
+    setRunMenuOpen(false)
+    runScript(name)
+  }
+
+  const handleRunFileFromMenu = (): void => {
+    setRunMenuOpen(false)
+    setCodeTab('OUTPUT')
+    void runFile()
+  }
+
+  const handleBootSimulator = (emulator: EmulatorInfo): void => {
+    setRunMenuOpen(false)
+    bootSimulator(emulator)
+  }
+
+  const simulators = emulators ? [...emulators.android, ...emulators.ios] : []
 
   const handleNewFile = async (): Promise<void> => {
     const name = await prompt({ title: 'New file', placeholder: 'name.ext', confirmLabel: 'Create' })
@@ -346,14 +413,90 @@ export default function RightPanel(): JSX.Element {
                 <path d="M4 4l8 8M12 4l-8 8" />
               </svg>
             </button>
-            <button
-              className={`run-btn${running ? ' is-running' : ''}`}
-              onClick={handleRun}
-              title={running ? 'Stop the running file' : 'Run the open file'}
-            >
-              <span className="run-glyph" aria-hidden="true">{running ? '■' : '▶'}</span>
-              {running ? 'Stop' : 'Run'}
-            </button>
+            <div className="run-split" ref={scriptsRef}>
+              <button
+                className={`run-btn${running ? ' is-running' : ''}`}
+                onClick={handleRun}
+                title={running ? 'Stop the running file' : 'Run the open file'}
+              >
+                <span className="run-glyph" aria-hidden="true">{running ? '■' : '▶'}</span>
+                {running ? 'Stop' : 'Run'}
+              </button>
+              <button
+                className={`run-caret${runMenuOpen ? ' active' : ''}`}
+                disabled={running}
+                aria-haspopup="true"
+                aria-expanded={runMenuOpen}
+                title="Run options — scripts & simulators"
+                aria-label="Run options"
+                onClick={() => setRunMenuOpen((v) => !v)}
+              >
+                <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 6l4 4 4-4" />
+                </svg>
+              </button>
+              {runMenuOpen && (
+                <div className="run-menu" role="menu">
+                  <div className="run-menu-title">Run</div>
+                  <button className="run-menu-item" role="menuitem" onClick={handleRunFileFromMenu}>
+                    <span className="run-menu-name">Run open file</span>
+                    <span className="run-menu-cmd">{fileLabel}</span>
+                  </button>
+
+                  {projectScripts.length > 0 && (
+                    <>
+                      <div className="run-menu-title">{scriptManager} scripts</div>
+                      {projectScripts.map((script) => (
+                        <button
+                          key={script.name}
+                          className="run-menu-item"
+                          role="menuitem"
+                          onClick={() => handleRunScript(script.name)}
+                        >
+                          <span className="run-menu-name">{script.name}</span>
+                          <span className="run-menu-cmd" title={script.command}>{script.command}</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+
+                  <div className="run-menu-title">
+                    Simulators
+                    <button
+                      className="run-menu-link"
+                      onClick={() => {
+                        setRunMenuOpen(false)
+                        toggleSimulators(true)
+                      }}
+                    >
+                      Manage
+                    </button>
+                  </div>
+                  {emulatorsLoading && simulators.length === 0 ? (
+                    <div className="run-menu-empty">Scanning for devices…</div>
+                  ) : simulators.length === 0 ? (
+                    <div className="run-menu-empty">No simulators found.</div>
+                  ) : (
+                    simulators.map((emulator) => (
+                      <button
+                        key={`${emulator.platform}-${emulator.id}`}
+                        className="run-menu-item"
+                        role="menuitem"
+                        onClick={() => handleBootSimulator(emulator)}
+                      >
+                        <span className="run-menu-name">
+                          <span className={`run-menu-os run-menu-os-${emulator.platform}`}>
+                            {emulator.platform === 'android' ? 'Android' : 'iOS'}
+                          </span>
+                          {emulator.name}
+                        </span>
+                        {emulator.detail && <span className="run-menu-cmd">{emulator.detail}</span>}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

@@ -36,12 +36,9 @@ function resolveCwd(cwd?: string): string {
   } catch {
     /* fall through to a safe default */
   }
-  try {
-    const fallback = process.cwd()
-    if (statSync(fallback).isDirectory()) return fallback
-  } catch {
-    /* fall through */
-  }
+  // No (or invalid) cwd means no project is open: open in the user's home
+  // directory like a normal local terminal, not the app's install dir
+  // (process.cwd()), which is meaningless to the user.
   return homedir()
 }
 

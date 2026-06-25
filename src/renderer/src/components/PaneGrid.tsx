@@ -1,12 +1,20 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import { useStore, activeProjectPath } from '../store'
 import ModelPane from './ModelPane'
 import ModelMenu from './ModelMenu'
 import logoUrl from '../assets/gennal-logo.png'
 
 function fitGrid(count: number, preferredRows: number, preferredCols: number): { rows: number; cols: number } {
+  if (count <= 1) return { rows: 1, cols: 1 }
+
   if (count <= preferredRows * preferredCols) {
-    return { rows: preferredRows, cols: preferredCols }
+    // Rows/Cols are a *cap*, not a fixed reservation: only allocate as many
+    // cells as there are panes so a lone terminal fills the whole area instead
+    // of being parked in one quarter with dead space around it. Fill columns
+    // first (reading order), then add only the rows those columns require.
+    const cols = Math.min(preferredCols, count)
+    const rows = Math.min(preferredRows, Math.ceil(count / cols))
+    return { rows, cols }
   }
 
   const cols = Math.ceil(Math.sqrt(count))
@@ -27,9 +35,13 @@ export default function PaneGrid(): JSX.Element {
   const mode = useStore((s) => s.mode)
   const activeId = useStore((s) => s.activeId)
   // Each pane is resized independently within its own grid cell: dragging an
-  // edge shrinks/grows just that terminal (anchored top-left, leaving a gap),
-  // without disturbing its neighbours. Sizes are keyed by session id.
-  const [paneSizes, setPaneSizes] = useState<Record<string, PaneSize>>({})
+  // edge (or using the pane's grow/shrink buttons) scales just that terminal,
+  // anchored top-left, without disturbing its neighbours. Sizes live in the
+  // store (keyed by session id) so the header buttons and the drag share state.
+  const paneSizes = useStore((s) => s.paneSizes)
+  const setPaneSize = useStore((s) => s.setPaneSize)
+  const resetPaneSizeStore = useStore((s) => s.resetPaneSize)
+  const prunePaneSizes = useStore((s) => s.prunePaneSizes)
   const sizeFor = (id: string): PaneSize => paneSizes[id] ?? { w: 1, h: 1 }
 
   // Terminals belong to the project they were opened in. We always render every
@@ -50,12 +62,8 @@ export default function PaneGrid(): JSX.Element {
   // Drop any per-pane sizes for sessions that have closed, so the map doesn't
   // grow unbounded as terminals come and go.
   useEffect(() => {
-    setPaneSizes((prev) => {
-      const live = Object.keys(prev).filter((id) => sessions.some((s) => s.id === id))
-      if (live.length === Object.keys(prev).length) return prev
-      return Object.fromEntries(live.map((id) => [id, prev[id]]))
-    })
-  }, [sessions])
+    prunePaneSizes(sessions.map((s) => s.id))
+  }, [sessions, prunePaneSizes])
 
   // Drag a pane's edge: measure its grid cell once, then map the pointer
   // position to a 0.2–1 fraction of that cell. The cell tracks stay fixed
@@ -73,13 +81,11 @@ export default function PaneGrid(): JSX.Element {
     if (!rect) return
 
     const onMove = (moveEvent: PointerEvent): void => {
-      setPaneSizes((prev) => {
-        const current = prev[id] ?? { w: 1, h: 1 }
-        const next = { ...current }
-        if (axis !== 'row') next.w = clamp((moveEvent.clientX - rect.left) / Math.max(rect.width, 1), 0.2, 1)
-        if (axis !== 'col') next.h = clamp((moveEvent.clientY - rect.top) / Math.max(rect.height, 1), 0.2, 1)
-        return { ...prev, [id]: next }
-      })
+      const current = useStore.getState().paneSizes[id] ?? { w: 1, h: 1 }
+      const next = { ...current }
+      if (axis !== 'row') next.w = clamp((moveEvent.clientX - rect.left) / Math.max(rect.width, 1), 0.2, 1)
+      if (axis !== 'col') next.h = clamp((moveEvent.clientY - rect.top) / Math.max(rect.height, 1), 0.2, 1)
+      setPaneSize(id, next)
     }
 
     const onUp = (): void => {
@@ -95,13 +101,12 @@ export default function PaneGrid(): JSX.Element {
 
   // Double-click a resizer to snap that axis (or both) back to an even split.
   const resetPaneSize = (id: string, axis: 'col' | 'row' | 'both'): void => {
-    setPaneSizes((prev) => {
-      const current = prev[id] ?? { w: 1, h: 1 }
-      const next = { ...current }
-      if (axis !== 'row') next.w = 1
-      if (axis !== 'col') next.h = 1
-      return { ...prev, [id]: next }
-    })
+    if (axis === 'both') {
+      resetPaneSizeStore(id)
+      return
+    }
+    const current = useStore.getState().paneSizes[id] ?? { w: 1, h: 1 }
+    setPaneSize(id, { w: axis === 'row' ? current.w : 1, h: axis === 'col' ? current.h : 1 })
   }
 
   return (

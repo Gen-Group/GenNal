@@ -3,6 +3,8 @@ import type {
   EmulatorInfo,
   FolderScanResult,
   ModelDef,
+  PackageManager,
+  ProjectScript,
   RunExit,
   RunOutput,
   SessionStatus,
@@ -31,6 +33,13 @@ export interface Session {
 }
 
 export type LayoutMode = 'grid' | 'tabs' | 'stack' | 'float'
+/** Side to place a new terminal relative to the one being split. */
+export type SplitDirection = 'up' | 'down' | 'left' | 'right'
+/** Fraction (0.2–1) of its grid cell a pane fills on each axis. */
+export interface PaneSize {
+  w: number
+  h: number
+}
 export type PanelSide = 'left' | 'right'
 export type CodePanelTab = 'CODE' | 'CHAT' | 'OUTPUT' | 'TERMINAL' | 'PROBLEMS' | 'PREVIEW'
 export type ThemeName =
@@ -328,6 +337,8 @@ interface AppState {
   rows: number
   cols: number
   mode: LayoutMode
+  /** Per-pane size override (fraction of its grid cell), keyed by session id. */
+  paneSizes: Record<string, PaneSize>
   panelSide: PanelSide
   panelWidth: number
   panelOpen: boolean
@@ -373,6 +384,10 @@ interface AppState {
   promptRequest: PromptRequest | null
   runOutput: RunOutput[]
   running: boolean
+  /** package.json scripts for the open project (empty when none / no project). */
+  projectScripts: ProjectScript[]
+  /** Package manager used to run those scripts (npm/pnpm/yarn/bun). */
+  scriptManager: PackageManager
   /** URL currently loaded in the in-app website preview (null = home page). */
   previewUrl: string | null
   /** Bumped to force the preview <webview> to reload the same URL. */
@@ -386,11 +401,21 @@ interface AppState {
   removeModel: (id: string) => Promise<void>
   toggleAddModel: (v?: boolean) => void
   addSession: (modelId: string) => void
+  /** Add a terminal next to `sourceId` on the given side, tiling the grid to match. */
+  splitSession: (sourceId: string, direction: SplitDirection) => void
   removeSession: (id: string) => void
+  /** Reorder panes: move `fromId` into `toId`'s slot (drag-to-rearrange the grid). */
+  moveSession: (fromId: string, toId: string) => void
   setStatus: (id: string, status: SessionStatus) => void
   setActive: (id: string) => void
   setGrid: (rows: number, cols: number) => void
   setMode: (mode: LayoutMode) => void
+  /** Set a pane's size override (each axis a 0.2–1 fraction of its grid cell). */
+  setPaneSize: (id: string, size: PaneSize) => void
+  /** Clear a pane's size override so it fills its cell again. */
+  resetPaneSize: (id: string) => void
+  /** Drop size overrides for sessions that no longer exist. */
+  prunePaneSizes: (liveIds: string[]) => void
   setPanelSide: (side: PanelSide) => void
   setPanelWidth: (width: number) => void
   togglePanel: (v?: boolean) => void
@@ -458,6 +483,10 @@ interface AppState {
   updateWorkspaceContent: (content: string) => void
   saveWorkspaceFile: (content: string) => Promise<boolean>
   runFile: () => Promise<void>
+  /** Run one of the project's package.json scripts into the OUTPUT panel. */
+  runScript: (name: string) => void
+  /** Refresh `projectScripts` for the given project (clears when undefined). */
+  loadProjectScripts: (cwd?: string) => Promise<void>
   stopRun: () => void
   appendRunOutput: (output: RunOutput) => void
   finishRun: (exit: RunExit) => void
@@ -782,7 +811,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   cursorBlink: true,
   scrollback: 2000,
   focusNewSessions: true,
-  windowsShell: 'powershell',
+  windowsShell: 'cmd',
   gpuAcceleration: 'auto',
   rightClickPaste: true,
   focusFollowsMouse: false,
@@ -1086,6 +1115,21 @@ export function activeProjectPath(workspace: WorkspaceOpenResult | null): string
 }
 
 /**
+ * Choose a grid that lays `count` panes along the split axis: horizontal splits
+ * grow columns (panes sit side by side), vertical splits grow rows (panes
+ * stack). Past four panes we wrap to a second track so cells don't get slivered.
+ */
+function gridForSplit(count: number, horizontal: boolean): { rows: number; cols: number } {
+  if (count <= 1) return { rows: 1, cols: 1 }
+  if (horizontal) {
+    return count <= 4 ? { rows: 1, cols: count } : { rows: 2, cols: Math.ceil(count / 2) }
+  }
+  return count <= 4 ? { rows: count, cols: 1 } : { rows: Math.ceil(count / 2), cols: 2 }
+}
+
+const clampFraction = (value: number): number => Math.max(0.2, Math.min(1, value))
+
+/**
  * Keep the active terminal valid for the project being shown: preserve the
  * current selection if it belongs to `projectPath`, otherwise fall back to that
  * project's first terminal (or null when it has none).
@@ -1106,6 +1150,7 @@ export const useStore = create<AppState>((set, get) => ({
   rows: 2,
   cols: 2,
   mode: 'grid',
+  paneSizes: {},
   panelSide: initialPanelSide(),
   panelWidth: initialPanelWidth(),
   panelOpen: initialPanelOpen(),
@@ -1144,6 +1189,8 @@ export const useStore = create<AppState>((set, get) => ({
   promptRequest: null,
   runOutput: [],
   running: false,
+  projectScripts: [],
+  scriptManager: 'npm',
   previewUrl: null,
   previewNonce: 0,
   previewCenter: false,
@@ -1195,6 +1242,9 @@ export const useStore = create<AppState>((set, get) => ({
     const model = get().models.find((m) => m.id === modelId)
     if (!model) return
     const projectPath = activeProjectPath(get().workspace)
+    // Each model launches its own CLI — picking Claude/Codex/Gemini runs that
+    // CLI even with no project (it just starts in the home folder). The "Shell"
+    // model has an empty command, so that's the way to a plain local terminal.
     const session = createSession(model, get().sessions.length, projectPath, projectPath)
     set((s) => ({
       sessions: [...s.sessions, session],
@@ -1202,11 +1252,53 @@ export const useStore = create<AppState>((set, get) => ({
     }))
   },
 
+  splitSession: (sourceId, direction) =>
+    set((s) => {
+      const sourceIndex = s.sessions.findIndex((x) => x.id === sourceId)
+      if (sourceIndex === -1) return {}
+      const source = s.sessions[sourceIndex]
+      const model =
+        s.models.find((m) => m.id === source.modelId) ?? s.models.find((m) => m.id !== 'custom')
+      if (!model) return {}
+
+      // New pane inherits the source's project + cwd so a split keeps you in the
+      // same place. It lands before the source for up/left, after for down/right.
+      const session = createSession(model, s.sessions.length, source.cwd, source.projectPath)
+      const before = direction === 'up' || direction === 'left'
+      const insertAt = before ? sourceIndex : sourceIndex + 1
+      const sessions = [...s.sessions.slice(0, insertAt), session, ...s.sessions.slice(insertAt)]
+
+      // Tile only against the panes shown together (same project) so the grid
+      // matches what's on screen, and force grid mode so the split is visible.
+      const visibleCount = sessions.filter((x) => x.projectPath === source.projectPath).length
+      const horizontal = direction === 'left' || direction === 'right'
+      const grid = gridForSplit(visibleCount, horizontal)
+
+      return { sessions, activeId: session.id, mode: 'grid', rows: grid.rows, cols: grid.cols }
+    }),
+
   removeSession: (id) =>
     set((s) => {
       const sessions = s.sessions.filter((x) => x.id !== id)
       const activeId = s.activeId === id ? (sessions[sessions.length - 1]?.id ?? null) : s.activeId
-      return { sessions, activeId }
+      const paneSizes = s.paneSizes[id] ? { ...s.paneSizes } : s.paneSizes
+      if (paneSizes !== s.paneSizes) delete paneSizes[id]
+      return { sessions, activeId, paneSizes }
+    }),
+
+  moveSession: (fromId, toId) =>
+    set((s) => {
+      if (fromId === toId) return {}
+      const from = s.sessions.findIndex((x) => x.id === fromId)
+      const to = s.sessions.findIndex((x) => x.id === toId)
+      if (from === -1 || to === -1) return {}
+      // Pull the dragged pane out, then drop it into the target's slot — past the
+      // target when moving forward so neighbours swap as you'd expect.
+      const sessions = [...s.sessions]
+      const [moved] = sessions.splice(from, 1)
+      const target = sessions.findIndex((x) => x.id === toId)
+      sessions.splice(from < to ? target + 1 : target, 0, moved)
+      return { sessions }
     }),
 
   setStatus: (id, status) =>
@@ -1215,6 +1307,26 @@ export const useStore = create<AppState>((set, get) => ({
   setActive: (id) => set({ activeId: id }),
   setGrid: (rows, cols) => set({ rows, cols }),
   setMode: (mode) => set({ mode }),
+
+  setPaneSize: (id, size) =>
+    set((s) => ({
+      paneSizes: { ...s.paneSizes, [id]: { w: clampFraction(size.w), h: clampFraction(size.h) } }
+    })),
+  resetPaneSize: (id) =>
+    set((s) => {
+      if (!s.paneSizes[id]) return {}
+      const paneSizes = { ...s.paneSizes }
+      delete paneSizes[id]
+      return { paneSizes }
+    }),
+  prunePaneSizes: (liveIds) =>
+    set((s) => {
+      const live = new Set(liveIds)
+      const keys = Object.keys(s.paneSizes)
+      if (keys.every((id) => live.has(id))) return {}
+      const paneSizes = Object.fromEntries(keys.filter((id) => live.has(id)).map((id) => [id, s.paneSizes[id]]))
+      return { paneSizes }
+    }),
   setPanelSide: (panelSide) => {
     try {
       window.localStorage.setItem('gennal.panelSide', panelSide)
@@ -1752,7 +1864,22 @@ export const useStore = create<AppState>((set, get) => ({
       const projectSettings = { ...s.projectSettings }
       delete projectSettings[key]
       saveProjectSettings(projectSettings)
-      return { recentProjects, projectSettings }
+      // Removing a project closes it: drop its terminals so the pty processes
+      // don't keep running headless. If it was the open workspace, unload that
+      // too and re-scope the active terminal to whatever remains.
+      const sessions = s.sessions.filter((x) => (x.projectPath ?? '').toLowerCase() !== key)
+      const closingActive = activeProjectPath(s.workspace)?.toLowerCase() === key
+      if (closingActive) clearWorkspaceRef()
+      const workspace = closingActive ? null : s.workspace
+      return {
+        recentProjects,
+        projectSettings,
+        sessions,
+        workspace,
+        workspaceError: closingActive ? null : s.workspaceError,
+        imagePreview: closingActive ? null : s.imagePreview,
+        activeId: scopedActiveId(sessions, s.activeId, activeProjectPath(workspace))
+      }
     })
   },
 
@@ -1794,7 +1921,23 @@ export const useStore = create<AppState>((set, get) => ({
 
   clearWorkspace: () => {
     clearWorkspaceRef()
-    set({ workspace: null, workspaceError: null, imagePreview: null })
+    set((s) => {
+      // Closing a project must also tear down its live terminals. Sessions are
+      // kept mounted (only hidden) so a pty survives project *switches*; on close
+      // the project is gone, so dropping its sessions here unmounts each
+      // ModelPane and its cleanup kills the pty (otherwise it runs on headless).
+      const closedPath = activeProjectPath(s.workspace)
+      const sessions = closedPath
+        ? s.sessions.filter((x) => x.projectPath !== closedPath)
+        : s.sessions
+      return {
+        workspace: null,
+        workspaceError: null,
+        imagePreview: null,
+        sessions,
+        activeId: scopedActiveId(sessions, s.activeId, undefined)
+      }
+    })
   },
 
   openWorkspaceFile: async (file) => {
@@ -1951,6 +2094,34 @@ export const useStore = create<AppState>((set, get) => ({
       filePath: selectedFile.path,
       cwd: workspace.kind === 'project' ? workspace.path : undefined
     })
+  },
+
+  runScript: (name) => {
+    const { workspace, running, scriptManager } = get()
+    if (running) return
+    const projectPath = activeProjectPath(workspace)
+    if (!projectPath) return
+    // Show the run live: open the code panel on its OUTPUT tab.
+    set({ runOutput: [], running: true, panelOpen: true, codePanelTab: 'OUTPUT' })
+    window.api.runStart({
+      command: scriptManager,
+      args: ['run', name],
+      cwd: projectPath,
+      label: `${scriptManager} run ${name}`
+    })
+  },
+
+  loadProjectScripts: async (cwd) => {
+    if (!cwd) {
+      set({ projectScripts: [], scriptManager: 'npm' })
+      return
+    }
+    try {
+      const result = await window.api.getProjectScripts(cwd)
+      set({ projectScripts: result.scripts, scriptManager: result.manager })
+    } catch {
+      set({ projectScripts: [], scriptManager: 'npm' })
+    }
   },
 
   stopRun: () => window.api.runStop(),

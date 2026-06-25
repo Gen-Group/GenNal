@@ -13,7 +13,7 @@ import {
   killAll
 } from './pty-manager'
 import { startStats, stopStats } from './stats-service'
-import { startRun, stopRun } from './run-manager'
+import { startRun, stopRun, readProjectScripts } from './run-manager'
 import { startChat, cancelChat, cancelAllChats } from './chat-manager'
 import { fetchGithubWork } from './github-service'
 import { listEmulators } from './emulator-manager'
@@ -751,6 +751,8 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('project:info', (_e, path: string): Promise<ProjectInfo> => readProjectInfo(path))
+
+  ipcMain.handle('project:scripts', (_e, cwd: string) => readProjectScripts(cwd))
 
   // Pick a project folder and report which child folders look like separate
   // repos/projects, so the renderer can offer "import separately vs monorepo".

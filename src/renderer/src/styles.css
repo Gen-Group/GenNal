@@ -2363,9 +2363,28 @@ textarea:focus-visible {
   padding: 7px 9px 7px 11px;
   border-bottom: 1px solid var(--s4);
   background: linear-gradient(180deg, color-mix(in srgb, var(--pane-accent, var(--accent)) 9%, var(--s1)), var(--s1));
+  cursor: grab;
+}
+.pane-head:active { cursor: grabbing; }
+/* Pane being dragged dims; the pane under the cursor shows a drop ring. */
+.pane.pane-dragging { opacity: .45; }
+.pane.pane-drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  border-radius: 12px;
 }
 .pane-dot { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 9px currentColor; flex: 0 0 auto; }
-.pane-name { font-weight: 700; font-size: 11.5px; letter-spacing: .01em; }
+/* Name truncates so it can never push the action buttons off the pane edge. */
+.pane-name {
+  font-weight: 700;
+  font-size: 11.5px;
+  letter-spacing: .01em;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .pane-tag {
   font-size: 10px;
   color: var(--tx2);
@@ -2373,8 +2392,14 @@ textarea:focus-visible {
   padding: 2px 8px;
   border-radius: 999px;
   line-height: 1.2;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
-.pane-actions { margin-left: auto; display: flex; gap: 1px; }
+/* Actions are split into purpose groups — add · size · run/close — separated by
+   whitespace so the row reads cleanly instead of one cramped strip of icons.
+   Pinned (flex 0 0 auto) so the Close button is always reachable, never clipped. */
+.pane-actions { margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.pane-grp { display: flex; align-items: center; gap: 1px; }
 .pane-act {
   position: relative;
   display: grid;
@@ -2392,9 +2417,59 @@ textarea:focus-visible {
 .pane-act svg { display: block; }
 .pane-act:hover { background: var(--ov2); color: var(--text); }
 .pane-act:active { background: var(--ov3); }
-.pane-act.active { background: var(--accent-mid); color: var(--text); }
+/* Active / accented states use a soft accent wash + accent-tinted icon rather
+   than a solid fill, so they read as a gentle highlight instead of a hard chip. */
+.pane-act.active {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
 .pane-act:last-child:hover { color: var(--text); }
 .pane-act[aria-label="Close terminal"]:hover { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
+
+/* Directional split control: a button that drops a 4-way pad to add a terminal
+   above/below/left/right of this one. */
+.pane-split { position: relative; display: inline-flex; }
+.pane-split-pad {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(3, 26px);
+  grid-template-rows: repeat(3, 26px);
+  gap: 2px;
+  padding: 6px;
+  background: var(--s3);
+  border: 1px solid var(--s4);
+  border-radius: 10px;
+  box-shadow: 0 18px 44px -20px #000, inset 0 1px 0 var(--ov1);
+}
+.psp {
+  display: grid;
+  place-items: center;
+  border: none;
+  background: var(--ov1);
+  color: var(--tx2);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.psp:hover { background: var(--accent-mid); color: var(--text); }
+.psp svg { display: block; }
+.psp-up { grid-area: 1 / 2; }
+.psp-left { grid-area: 2 / 1; }
+.psp-right { grid-area: 2 / 3; }
+.psp-down { grid-area: 3 / 2; }
+.psp-core {
+  grid-area: 2 / 2;
+  align-self: center;
+  justify-self: center;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--pane-accent, var(--accent));
+  box-shadow: 0 0 8px var(--pane-accent, var(--accent));
+}
 .more-icon::before {
   content: "";
   position: absolute;
@@ -2660,6 +2735,109 @@ textarea:focus-visible {
   border-color: #f4677a !important;
   color: #fff !important;
   box-shadow: 0 1px 0 var(--ov4) inset, 0 2px 8px #d2304844;
+}
+
+/* Run/Stop button + a caret that drops the project's package.json scripts. */
+.run-split { position: relative; display: inline-flex; align-items: stretch; }
+.run-split:has(.run-caret) .run-btn {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.run-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  color: var(--s2);
+  background: linear-gradient(180deg, #22c55e, #15a046);
+  border: 1px solid #2fd06b;
+  border-left-color: #128043;
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+  cursor: pointer;
+  transition: filter .14s ease;
+}
+.run-caret svg { display: block; }
+.run-caret:hover:not(:disabled) { filter: brightness(1.08); }
+.run-caret.active { filter: brightness(.92); }
+.run-caret:disabled { opacity: .5; cursor: default; }
+.run-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 220px;
+  max-width: 340px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--s3);
+  border: 1px solid var(--s4);
+  border-radius: 10px;
+  box-shadow: 0 18px 44px -20px #000, inset 0 1px 0 var(--ov1);
+}
+.run-menu-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--tx3);
+  padding: 8px 8px 4px;
+}
+.run-menu-title:first-child { padding-top: 4px; }
+.run-menu-link {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  padding: 0;
+}
+.run-menu-link:hover { text-decoration: underline; }
+.run-menu-empty {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  color: var(--tx3);
+}
+.run-menu-os {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  padding: 1px 5px;
+  border-radius: 999px;
+  margin-right: 6px;
+  color: var(--s2);
+}
+.run-menu-os-android { background: #3ddc84; }
+.run-menu-os-ios { background: #0a84ff; color: #fff; }
+.run-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--text);
+}
+.run-menu-item:hover { background: var(--ov2); }
+.run-menu-name { font-size: 12px; font-weight: 650; }
+.run-menu-cmd {
+  max-width: 100%;
+  font-size: 10.5px;
+  color: var(--tx2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .rp-file {
   display: grid;

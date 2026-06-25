@@ -12,7 +12,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
-import { useStore, scrollbackLines, type Session } from '../store'
+import { useStore, scrollbackLines, windowsShellCommand, type Session, type SplitDirection } from '../store'
 import { isLocalhostUrl } from '../preview-links'
 import { playNotificationSound } from '../notification-sound'
 import TerminalFindBar from './TerminalFindBar'
@@ -69,6 +69,11 @@ function keyToPtyData(e: KeyLikeEvent): string | null {
   }
 }
 
+// Custom drag type carrying a session id when a pane header is dragged onto
+// another pane to reorder it. Distinct from file drops (which carry no such
+// type), so the two drag flows never collide.
+const PANE_DND = 'application/x-gennal-pane'
+
 function isImagePath(path: string): boolean {
   return /\.(png|jpe?g|gif|webp|bmp|svg|ico|avif)$/i.test(path)
 }
@@ -93,6 +98,12 @@ export default function ModelPane({
   const terminalRef = useRef<Terminal | null>(null)
   const searchRef = useRef<SearchAddon | null>(null)
   const [findOpen, setFindOpen] = useState(false)
+  const [splitOpen, setSplitOpen] = useState(false)
+  // Drag the header to reorder panes in the grid. `dropActive` highlights this
+  // pane as a drop target; `dragging` dims the one being moved.
+  const [dropActive, setDropActive] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  const splitRef = useRef<HTMLDivElement>(null)
   const noticeTimerRef = useRef<number | null>(null)
   // The terminal effect (keyed by session.id) needs a stable hook into the
   // latest paste handler, and a guard so a single Ctrl+V isn't pasted twice when
@@ -105,13 +116,12 @@ export default function ModelPane({
   const [attachmentNotice, setAttachmentNotice] = useState<AttachmentNotice | null>(null)
   const setStatus = useStore((s) => s.setStatus)
   const removeSession = useStore((s) => s.removeSession)
+  const moveSession = useStore((s) => s.moveSession)
   const setActive = useStore((s) => s.setActive)
   const activeId = useStore((s) => s.activeId)
   const sessions = useStore((s) => s.sessions)
   const addSession = useStore((s) => s.addSession)
-  const setGrid = useStore((s) => s.setGrid)
-  const rows = useStore((s) => s.rows)
-  const cols = useStore((s) => s.cols)
+  const splitSession = useStore((s) => s.splitSession)
   const openPreview = useStore((s) => s.openPreview)
   const terminalSettings = useStore((s) => s.terminalSettings)
   const notificationSettings = useStore((s) => s.notificationSettings)
@@ -226,7 +236,9 @@ export default function ModelPane({
     })
 
     const { id, command, cwd } = session
-    window.api.ptyCreate({ id, command, cwd })
+    // Honour the user's Windows shell choice (Command Prompt / PowerShell /
+    // Git Bash / WSL) for grid terminals too — not just the bottom panel.
+    window.api.ptyCreate({ id, command, cwd, shell: windowsShellCommand(settingsRef.current.windowsShell) })
     setStatus(id, 'running')
 
     // Opening a terminal or running a command never opens the preview on its
@@ -269,6 +281,23 @@ export default function ModelPane({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id])
+
+  // Close the split-direction popover on an outside click or Escape.
+  useEffect(() => {
+    if (!splitOpen) return
+    const onDown = (e: globalThis.MouseEvent): void => {
+      if (!splitRef.current?.contains(e.target as Node)) setSplitOpen(false)
+    }
+    const onKey = (e: globalThis.KeyboardEvent): void => {
+      if (e.key === 'Escape') setSplitOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [splitOpen])
 
   useEffect(() => {
     const term = terminalRef.current
@@ -391,7 +420,25 @@ export default function ModelPane({
   }
   pasteRef.current = pasteIntoTerminal
 
+  // The header is a drag handle: grab it to move this pane onto another.
+  const onHeadDragStart = (e: ReactDragEvent<HTMLDivElement>): void => {
+    e.dataTransfer.setData(PANE_DND, session.id)
+    e.dataTransfer.effectAllowed = 'move'
+    setDragging(true)
+  }
+  const onHeadDragEnd = (): void => setDragging(false)
+
   const onPaneDrop = (e: ReactDragEvent<HTMLDivElement>): void => {
+    // A pane drop reorders the grid; a file drop attaches an image path.
+    const movedId = e.dataTransfer.getData(PANE_DND)
+    if (movedId) {
+      e.preventDefault()
+      e.stopPropagation()
+      setDropActive(false)
+      if (movedId !== session.id) moveSession(movedId, session.id)
+      return
+    }
+
     const file = Array.from(e.dataTransfer.files).find((entry) => {
       const dropped = entry as DroppedFile
       return dropped.path && isImagePath(dropped.path)
@@ -406,10 +453,20 @@ export default function ModelPane({
   }
 
   const onPaneDragOver = (e: ReactDragEvent<HTMLDivElement>): void => {
+    if (e.dataTransfer.types.includes(PANE_DND)) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move'
+      if (!dragging && !dropActive) setDropActive(true)
+      return
+    }
     const hasFile = Array.from(e.dataTransfer.items).some((item) => item.kind === 'file')
     if (!hasFile) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'copy'
+  }
+
+  const onPaneDragLeave = (e: ReactDragEvent<HTMLDivElement>): void => {
+    if (!paneRef.current?.contains(e.relatedTarget as Node)) setDropActive(false)
   }
 
   const onPaneKeyDown = (e: ReactKeyboardEvent): void => {
@@ -428,6 +485,11 @@ export default function ModelPane({
   const actionClick = (e: MouseEvent<HTMLButtonElement>, action: () => void): void => {
     e.stopPropagation()
     action()
+  }
+
+  const split = (direction: SplitDirection): void => {
+    splitSession(session.id, direction)
+    setSplitOpen(false)
   }
 
   const onPaneMouseEnter = (): void => {
@@ -464,7 +526,7 @@ export default function ModelPane({
   return (
     <div
       ref={paneRef}
-      className={`pane ${activeId === session.id ? 'focused' : ''}`}
+      className={`pane ${activeId === session.id ? 'focused' : ''} ${dropActive ? 'pane-drop-target' : ''} ${dragging ? 'pane-dragging' : ''}`}
       style={{ '--pane-accent': session.accent, display: hidden ? 'none' : undefined } as CSSProperties}
       onMouseDown={focusPane}
       onClick={focusPane}
@@ -473,30 +535,65 @@ export default function ModelPane({
       onKeyDown={onPaneKeyDown}
       onPasteCapture={(e) => void onPanePaste(e)}
       onDragOver={onPaneDragOver}
+      onDragLeave={onPaneDragLeave}
       onDrop={onPaneDrop}
       tabIndex={0}
     >
-      <div className="pane-head">
+      <div
+        className="pane-head"
+        draggable
+        onDragStart={onHeadDragStart}
+        onDragEnd={onHeadDragEnd}
+        title="Drag to move this terminal"
+      >
         <span className="pane-dot" style={{ background: session.accent, color: session.accent }} />
         <span className="pane-name">Terminal {number ?? (terminalNumber || 1)}</span>
         <span className="pane-tag">{session.tag}</span>
         <span className="pane-actions">
+          <span className="pane-grp">
           <button className="pane-act" title="New terminal" aria-label="New terminal" onClick={(e) => actionClick(e, () => addSession(session.modelId))}>
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
               <path d="M8 3.5v9M3.5 8h9" />
             </svg>
           </button>
-          <button className={`pane-act ${rows === 1 && cols === 2 ? 'active' : ''}`} title="Split into two columns" aria-label="Split into two columns" aria-pressed={rows === 1 && cols === 2} onClick={(e) => actionClick(e, () => setGrid(1, 2))}>
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true">
-              <rect x="2" y="3" width="12" height="10" rx="1.5" />
-              <line x1="8" y1="3" x2="8" y2="13" />
-            </svg>
-          </button>
-          <button className={`pane-act ${rows === 2 && cols === 2 ? 'active' : ''}`} title="2×2 grid layout" aria-label="2×2 grid layout" aria-pressed={rows === 2 && cols === 2} onClick={(e) => actionClick(e, () => setGrid(2, 2))}>
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true">
-              <rect x="2" y="3" width="12" height="10" rx="1.5" />
-              <line x1="8" y1="3" x2="8" y2="13" />
-              <line x1="2" y1="8" x2="14" y2="8" />
+          <div className="pane-split" ref={splitRef}>
+            <button
+              className={`pane-act ${splitOpen ? 'active' : ''}`}
+              title="Split — add a terminal up, down, left or right"
+              aria-label="Split terminal"
+              aria-haspopup="true"
+              aria-expanded={splitOpen}
+              onClick={(e) => actionClick(e, () => setSplitOpen((v) => !v))}
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true">
+                <rect x="2" y="3" width="12" height="10" rx="1.5" />
+                <line x1="8" y1="3" x2="8" y2="13" />
+              </svg>
+            </button>
+            {splitOpen && (
+              <div className="pane-split-pad" role="menu" aria-label="Add terminal in a direction">
+                <button className="psp psp-up" role="menuitem" title="Add terminal above" aria-label="Add terminal above" onClick={(e) => actionClick(e, () => split('up'))}>
+                  <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 12.5V4M4.5 7.5 8 4l3.5 3.5" /></svg>
+                </button>
+                <button className="psp psp-left" role="menuitem" title="Add terminal left" aria-label="Add terminal to the left" onClick={(e) => actionClick(e, () => split('left'))}>
+                  <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12.5 8H4M7.5 4.5 4 8l3.5 3.5" /></svg>
+                </button>
+                <span className="psp-core" aria-hidden="true" />
+                <button className="psp psp-right" role="menuitem" title="Add terminal right" aria-label="Add terminal to the right" onClick={(e) => actionClick(e, () => split('right'))}>
+                  <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3.5 8H12M8.5 4.5 12 8l-3.5 3.5" /></svg>
+                </button>
+                <button className="psp psp-down" role="menuitem" title="Add terminal below" aria-label="Add terminal below" onClick={(e) => actionClick(e, () => split('down'))}>
+                  <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 3.5V12M4.5 8.5 8 12l3.5-3.5" /></svg>
+                </button>
+              </div>
+            )}
+          </div>
+          </span>
+          <span className="pane-grp">
+          <button className="pane-act" title="Send Enter to the shell" aria-label="Send Enter to the shell" onClick={(e) => actionClick(e, () => window.api.ptyInput(session.id, '\r'))}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M13 3.5v4a2 2 0 0 1-2 2H3.5" />
+              <path d="M6 7 3 9.5 6 12" />
             </svg>
           </button>
           <button className="pane-act" title="Close terminal" aria-label="Close terminal" onClick={(e) => actionClick(e, () => removeSession(session.id))}>
@@ -504,12 +601,7 @@ export default function ModelPane({
               <path d="M3 4.5h10M6.5 4.5V3.6a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v.9M4.8 4.5l.55 8a1 1 0 0 0 1 .93h3.3a1 1 0 0 0 1-.93l.55-8M6.8 7v4M9.2 7v4" />
             </svg>
           </button>
-          <button className="pane-act" title="Send Enter to the shell" aria-label="Send Enter to the shell" onClick={(e) => actionClick(e, () => window.api.ptyInput(session.id, '\r'))}>
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M13 3.5v4a2 2 0 0 1-2 2H3.5" />
-              <path d="M6 7 3 9.5 6 12" />
-            </svg>
-          </button>
+          </span>
         </span>
       </div>
       <div className="pane-term" ref={termRef} onMouseDown={focusPane}>

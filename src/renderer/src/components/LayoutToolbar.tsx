@@ -2,13 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore, type LayoutMode } from '../store'
 import ModelMenu from './ModelMenu'
 
-const MODES: { id: LayoutMode; label: string }[] = [
-  { id: 'grid', label: 'Grid' },
-  { id: 'tabs', label: 'Tabs' },
-  { id: 'stack', label: 'Stack' },
-  { id: 'float', label: 'Float' }
-]
-
 const svgProps = {
   viewBox: '0 0 16 16',
   width: 15,
@@ -69,8 +62,6 @@ type GridMenu = 'rows' | 'cols' | null
 export default function LayoutToolbar(): JSX.Element {
   const [openMenu, setOpenMenu] = useState<GridMenu>(null)
   const menuRef = useRef<HTMLDivElement>(null)
-  const mode = useStore((s) => s.mode)
-  const setMode = useStore((s) => s.setMode)
   const rows = useStore((s) => s.rows)
   const cols = useStore((s) => s.cols)
   const setGrid = useStore((s) => s.setGrid)
@@ -109,24 +100,6 @@ export default function LayoutToolbar(): JSX.Element {
 
   return (
     <div className="toolbar">
-      {!previewCenter && (
-        <div className="seg">
-          {MODES.map((m) => (
-            <button
-              key={m.id}
-              className={`seg-btn ${mode === m.id ? 'active' : ''}`}
-              aria-pressed={mode === m.id}
-              onClick={() => setMode(m.id)}
-            >
-              <span className="seg-ico">
-                <ModeIcon id={m.id} />
-              </span>
-              {m.label}
-            </button>
-          ))}
-        </div>
-      )}
-
       <div className="seg">
         <button
           className={`seg-btn ${previewCenter ? '' : 'active'}`}

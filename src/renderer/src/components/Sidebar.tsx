@@ -275,7 +275,6 @@ export default function Sidebar(): JSX.Element {
   const models = useStore((s) => s.models)
   const addSession = useStore((s) => s.addSession)
   const stats = useStore((s) => s.stats)
-  const togglePalette = useStore((s) => s.togglePalette)
   const tasksOpen = useStore((s) => s.tasksOpen)
   const toggleTasks = useStore((s) => s.toggleTasks)
   const automationsOpen = useStore((s) => s.automationsOpen)
@@ -606,15 +605,6 @@ export default function Sidebar(): JSX.Element {
             </svg>
           </span>
           <span className="nav-label">GenNal Mobile</span>
-        </button>
-        <button className="side-nav-item" title="Search (Ctrl K)" onClick={() => togglePalette(true)}>
-          <span className="nav-ico" aria-hidden="true">
-            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="7" cy="7" r="4.2" />
-              <path d="M10.2 10.2 14 14" />
-            </svg>
-          </span>
-          <span className="nav-label">Search</span>
         </button>
       </nav>
 

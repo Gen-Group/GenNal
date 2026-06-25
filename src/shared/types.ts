@@ -185,8 +185,27 @@ export interface CliUsage {
 export type RunStream = 'stdout' | 'stderr' | 'system'
 
 export interface RunStartPayload {
-  filePath: string
   cwd?: string
+  /** Run a single source file by extension (interpreter chosen automatically). */
+  filePath?: string
+  /** …or run an explicit command (project scripts). Spawned through the shell. */
+  command?: string
+  args?: string[]
+  /** Friendly label shown in the output header instead of the raw command. */
+  label?: string
+}
+
+export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun'
+
+export interface ProjectScript {
+  name: string
+  /** The raw command the script runs, shown as a subtitle. */
+  command: string
+}
+
+export interface ProjectScripts {
+  manager: PackageManager
+  scripts: ProjectScript[]
 }
 
 export interface RunOutput {

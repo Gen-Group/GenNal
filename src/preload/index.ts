@@ -19,6 +19,7 @@ import type {
   MobileStatus,
   ModelDef,
   ProjectInfo,
+  ProjectScripts,
   PtyCreatePayload,
   PtyData,
   PtyExit,
@@ -67,6 +68,8 @@ const api = {
   openWorkspacePath: (payload: WorkspaceOpenPathPayload): Promise<WorkspaceOpenResult> =>
     ipcRenderer.invoke('workspace:open-path', payload),
   projectInfo: (path: string): Promise<ProjectInfo> => ipcRenderer.invoke('project:info', path),
+  getProjectScripts: (cwd: string): Promise<ProjectScripts> =>
+    ipcRenderer.invoke('project:scripts', cwd),
   pickProjectFolder: (): Promise<FolderScanResult | null> =>
     ipcRenderer.invoke('workspace:pick-folder'),
   scanProjectFolder: (path: string): Promise<FolderScanResult> =>

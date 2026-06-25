@@ -46,5 +46,27 @@ mac:
 dmg:
   title: GenNal ${version}
 
+linux:
+  icon: build/icon.png
+  category: Development
+  synopsis: Multi-Model AI Cockpit
+  description: Launch Codex, Claude & Gemini side by side in one workspace.
+  maintainer: GenNal <loyeight@gmail.com>
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+    - target: snap
+      arch:
+        - x64
+  # ext differentiates the three artifacts (.AppImage/.deb/.snap), so no arch suffix needed.
+  artifactName: GenNal-${version}.${ext}
+
+appImage:
+  artifactName: GenNal-${version}.${ext}
+
 # After building, copy dist/GenNal-Setup-1.0.0.exe to
 # website/downloads/GenNal-Setup.exe to publish it on the site.
