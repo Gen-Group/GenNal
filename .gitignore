@@ -3,7 +3,10 @@ out/
 dist/
 *.log
 .DS_Store
-# Installer is self-hosted via the website Docker image, so the current
-# release .exe IS committed (needed in the build context). Ignore all others.
+# Installers are self-hosted via the website Docker image, so the current
+# release files are committed (needed in the build context). Ignore all others.
 website/downloads/*.exe
 !website/downloads/GenNal-Setup-1.0.11.exe
+website/downloads/*.dmg
+!website/downloads/GenNal-1.0.11-arm64.dmg
+!website/downloads/GenNal-1.0.11-x64.dmg

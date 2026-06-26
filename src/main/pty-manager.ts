@@ -1,6 +1,6 @@
 import * as pty from 'node-pty'
 import { homedir } from 'os'
-import { existsSync, statSync, chmodSync } from 'fs'
+import { existsSync, statSync, chmodSync, readdirSync } from 'fs'
 import { dirname, join } from 'path'
 import type { BrowserWindow } from 'electron'
 import type { PtyCreatePayload } from '../shared/types'
@@ -20,8 +20,21 @@ function ensureSpawnHelperExecutable(): void {
     // require.resolve works at runtime in the CJS-bundled main and follows
     // Electron's asar-unpacked redirection to the real on-disk module.
     const ptyRoot = dirname(dirname(require.resolve('node-pty')))
-    const helper = join(ptyRoot, 'build', 'Release', 'spawn-helper')
-    if (existsSync(helper)) chmodSync(helper, 0o755)
+    // node-pty ships the helper differently per version: a gyp build leaves it
+    // at build/Release/spawn-helper, while the prebuilt (node-gyp-build) layout
+    // used by 1.1.0 puts it at prebuilds/<platform>-<arch>/spawn-helper. npm's
+    // tarball extraction can strip the +x bit from either, so chmod every one
+    // we find rather than assuming a single location.
+    const candidates = [join(ptyRoot, 'build', 'Release', 'spawn-helper')]
+    const prebuilds = join(ptyRoot, 'prebuilds')
+    if (existsSync(prebuilds)) {
+      for (const d of readdirSync(prebuilds)) {
+        candidates.push(join(prebuilds, d, 'spawn-helper'))
+      }
+    }
+    for (const helper of candidates) {
+      if (existsSync(helper)) chmodSync(helper, 0o755)
+    }
   } catch {
     /* best effort — surfaced as a normal spawn error below if it still fails */
   }

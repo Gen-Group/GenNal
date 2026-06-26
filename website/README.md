@@ -9,21 +9,20 @@ website/
 ├─ index.html        landing page (hero, features, models, requirements, download)
 ├─ styles.css        dark theme matching the app brand
 ├─ vercel.json       static-site config (clean URLs + asset caching)
-└─ downloads/        local-only installer drop (gitignored — see below)
+└─ downloads/        installer drop (gitignored except current release files)
 ```
 
 ## Where the installers are hosted
-- **Windows (`.exe`)** is **self-hosted** from this site at
-  `/downloads/GenNal-Setup-1.0.10.exe`. The current release `.exe` is committed
-  (the `.gitignore` allows only that one file) so it ships inside the Docker
-  build context. Older `.exe`s stay ignored.
-- **macOS (`.dmg`)** is built on CI (`.github/workflows/release-mac.yml`,
-  macOS runner) and uploaded to the matching **GitHub Release**. The download
-  buttons point at:
+- **Windows (`.exe`)** is self-hosted from this site at
+  `/downloads/GenNal-Setup-1.0.11.exe`.
+- **macOS (`.dmg`)** is self-hosted from this site at:
   ```
-  https://github.com/Gen-Group/GenNal/releases/download/v1.0.8/GenNal-1.0.8-arm64.dmg
-  https://github.com/Gen-Group/GenNal/releases/download/v1.0.8/GenNal-1.0.8-x64.dmg
+  /downloads/GenNal-1.0.11-arm64.dmg
+  /downloads/GenNal-1.0.11-x64.dmg
   ```
+The `.gitignore` allowlist keeps only the current release installers committed
+so they ship inside the Docker/Vercel build context. Older installers stay
+ignored.
 
 ## Preview locally
 ```powershell
@@ -49,7 +48,10 @@ npx vercel --prod     # production deploy
 ```
 
 ## Cutting a new version
-1. Build the installer: `npm run dist:win` (from repo root) → `dist/GenNal-Setup-<ver>.exe`
-2. Create/upload it to a GitHub Release: `gh release create v<ver> dist/GenNal-Setup-<ver>.exe`
-3. Update the two download `href`s and the `v<ver>` label in `index.html`
+1. Build the installers from repo root:
+   - Windows: `npm run dist:win` -> `dist/GenNal-Setup-<ver>.exe`
+   - macOS: `npm run dist:mac` -> `dist/GenNal-<ver>-arm64.dmg` and `dist/GenNal-<ver>-x64.dmg`
+2. Copy the current installer files into `website/downloads/`.
+3. Update the download `href`s, the `v<ver>` label in `index.html`, and the
+   `.gitignore` allowlist.
 4. Push — Vercel redeploys automatically.

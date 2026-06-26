@@ -1,8 +1,7 @@
 # GenNal — macOS install
 
 macOS builds **must be made on a Mac** — GenNal uses the native `node-pty` module
-(compiled per-OS) and `.dmg` packaging relies on macOS-only tools. Neither can be
-produced on Windows, which is why the release page only ships the Windows `.exe`.
+(compiled per-OS) and `.dmg` packaging relies on macOS-only tools.
 
 ## Option A — one command (build + install)
 
@@ -17,8 +16,8 @@ bash mac/install.sh
 This installs **GenNal.app** into `/Applications` and also leaves the distributable
 installers in `dist/`:
 
-- `GenNal-1.0.4-arm64.dmg` — Apple Silicon (M1/M2/M3/M4)
-- `GenNal-1.0.4-x64.dmg` — Intel
+- `GenNal-1.0.11-arm64.dmg` — Apple Silicon (M1/M2/M3/M4)
+- `GenNal-1.0.11-x64.dmg` — Intel
 
 ## Option B — build the `.dmg` only
 
@@ -38,10 +37,12 @@ The build is unsigned, so the first time macOS will warn you. Either:
 
 (`mac/install.sh` clears this automatically.)
 
-## Publishing the `.dmg` to the GitHub release
+## Publishing the `.dmg`
 
-After building on a Mac, attach the installers to the release so others can download them:
+After building on a Mac, copy the installers into the website download folder so
+the Download buttons can serve them:
 
 ```bash
-gh release upload v1.0.4 dist/GenNal-1.0.4-arm64.dmg dist/GenNal-1.0.4-x64.dmg
+cp dist/GenNal-1.0.11-arm64.dmg website/downloads/
+cp dist/GenNal-1.0.11-x64.dmg website/downloads/
 ```

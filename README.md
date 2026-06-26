@@ -24,7 +24,7 @@ Grab the latest installer from the [**Releases**](https://github.com/Gen-Group/G
 
 ### Windows
 
-1. Download **`GenNal-Setup-1.0.4.exe`** from the latest release.
+1. Download **`GenNal-Setup-1.0.11.exe`** from the latest release or download site.
 2. Run it and follow the prompts (you can choose the install location).
 3. Launch **GenNal** from the Start Menu or desktop shortcut.
 
@@ -33,11 +33,12 @@ Grab the latest installer from the [**Releases**](https://github.com/Gen-Group/G
 
 ### macOS
 
-> ⚠️ A prebuilt macOS `.dmg` is **not** attached to the release. macOS apps can only be
-> packaged on a Mac (the native `node-pty` module and `.dmg`/`.app` bundling are
-> macOS-only and cannot be produced on Windows), so you build it locally on a Mac.
+Download **`GenNal-1.0.11-arm64.dmg`** for Apple Silicon or
+**`GenNal-1.0.11-x64.dmg`** for Intel Macs from the latest release or download site.
+The build is unsigned, so on first launch **right-click GenNal → Open → Open**.
 
-On a Mac with [Node.js 20+](https://nodejs.org) and `git`:
+You can also build and install locally on a Mac with [Node.js 20+](https://nodejs.org)
+and `git`:
 
 ```bash
 git clone https://github.com/Gen-Group/GenNal.git
@@ -45,11 +46,11 @@ cd GenNal
 bash mac/install.sh      # builds GenNal and installs GenNal.app into /Applications
 ```
 
-This also produces `GenNal-1.0.4-arm64.dmg` (Apple Silicon) and `GenNal-1.0.4-x64.dmg`
+This also produces `GenNal-1.0.11-arm64.dmg` (Apple Silicon) and `GenNal-1.0.11-x64.dmg`
 (Intel) in `dist/`. See [`mac/README.md`](mac/README.md) for the full guide.
 
-The build is unsigned, so on first launch **right-click GenNal → Open → Open**
-(or run `xattr -cr /Applications/GenNal.app` once). `mac/install.sh` clears this for you.
+If you build locally, you can also run `xattr -cr /Applications/GenNal.app` once;
+`mac/install.sh` clears this for you.
 
 ## Quick start (dev)
 
@@ -69,19 +70,19 @@ npm run dev            # launch the app with hot reload
 **Windows** (run on Windows):
 
 ```powershell
-npm run dist:win       # → dist/GenNal-Setup-1.0.4.exe  (NSIS installer)
+npm run dist:win       # → dist/GenNal-Setup-1.0.11.exe  (NSIS installer)
 ```
 
 Then publish it on the website:
 
 ```powershell
-Copy-Item dist\GenNal-Setup-1.0.4.exe website\downloads\GenNal-Setup.exe
+Copy-Item dist\GenNal-Setup-1.0.11.exe website\downloads\
 ```
 
 **macOS** (must run on a Mac — native `node-pty` and `.dmg` packaging are macOS-only):
 
 ```bash
-npm run dist:mac       # → dist/GenNal-1.0.4-arm64.dmg and dist/GenNal-1.0.4-x64.dmg
+npm run dist:mac       # → dist/GenNal-1.0.11-arm64.dmg and dist/GenNal-1.0.11-x64.dmg
 ```
 
 ## What it does

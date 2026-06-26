@@ -68,5 +68,5 @@ linux:
 appImage:
   artifactName: GenNal-${version}.${ext}
 
-# After building, copy dist/GenNal-Setup-1.0.0.exe to
-# website/downloads/GenNal-Setup.exe to publish it on the site.
+# After building, copy the current installer files from dist/ into
+# website/downloads/ and update the website links for that version.

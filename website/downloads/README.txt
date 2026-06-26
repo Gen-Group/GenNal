@@ -1,11 +1,13 @@
-Place the built installer here as:
+Place the built installers here as:
 
-    GanNal-Setup.exe
+    GenNal-Setup-<version>.exe
+    GenNal-<version>-arm64.dmg
+    GenNal-<version>-x64.dmg
 
-It is produced by Phase 8 of PLAN.md:
+They are produced from the repo root:
 
-    npm run build
-    npx electron-builder         # outputs dist/GanNal-Setup-1.0.0.exe
+    npm run dist:win
+    npm run dist:mac
 
-Copy/rename that file to this folder (GanNal-Setup.exe) and the website's
-"Download for Windows" buttons will serve it.
+Copy the current release files from dist/ to this folder and update the
+website links plus the root .gitignore allowlist for that version.

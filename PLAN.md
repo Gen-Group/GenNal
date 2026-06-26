@@ -43,7 +43,7 @@ Alternatives if you change your mind later: Tauri (smaller .exe, Rust), or direc
 | State      | Zustand                         | workspaces / sessions / layout store     |
 | Styling    | Tailwind CSS                    | Dark theme, accent dots, chips           |
 | Stats      | systeminformation               | CPU / Memory sparklines                  |
-| Packaging  | electron-builder (NSIS)         | Produces `GanNal-Setup-1.0.0.exe`        |
+| Packaging  | electron-builder                | Produces Windows and macOS installers    |
 
 ---
 
@@ -205,20 +205,21 @@ GenNal/                          (electron-vite layout — as built)
 - Optional: per-pane resource cap via Windows Job Objects.
 - **Done when:** keyboard-driven, broadcast works across panes.
 
-### Phase 8 — Package to .exe ☐
-- `electron-builder.yml` → NSIS target, app icon, productName "GanNal".
-- `npm run build && npx electron-builder` → `dist/GanNal-Setup-1.0.0.exe`.
+### Phase 8 — Package installers ☐
+- `electron-builder.yml` → NSIS, DMG, AppImage/deb/snap targets, app icon, productName "GenNal".
+- `npm run dist:win` → `dist/GenNal-Setup-1.0.11.exe`.
+- `npm run dist:mac` → `dist/GenNal-1.0.11-arm64.dmg` and `dist/GenNal-1.0.11-x64.dmg`.
 - Optional: auto-update feed.
-- **Done when:** the `.exe` installs and runs on a clean machine.
+- **Done when:** the installers run on clean Windows and macOS machines.
 
 ### Phase 9 — Download website ☑ (scaffolded)
 - `website/index.html` + `website/styles.css` — dark landing page (hero, features,
   models, requirements, download band). No build step, plain HTML/CSS.
-- Download buttons point to `website/downloads/GanNal-Setup.exe`.
-- **To finish:** copy the Phase 8 installer into `website/downloads/GanNal-Setup.exe`
-  (or host on GitHub Releases and update the button `href`), then deploy `website/`
-  to GitHub Pages / Netlify / Vercel / Cloudflare Pages. See `website/README.md`.
-- **Done when:** visitors can download a working `.exe` from the live URL.
+- Download buttons point to the current release files in `website/downloads/`.
+- **To finish:** copy the Phase 8 installers into `website/downloads/`, update the
+  versioned links/allowlist, then deploy `website/` to GitHub Pages / Netlify /
+  Vercel / Cloudflare Pages. See `website/README.md`.
+- **Done when:** visitors can download working Windows and macOS installers from the live URL.
 
 ---
 
