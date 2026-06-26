@@ -12,12 +12,19 @@
   <link rel="icon" type="image/png" href="assets/gennal-logo.png" />
   <link rel="apple-touch-icon" href="assets/gennal-logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- ambient background -->
+  <!-- ambient 3D background -->
   <div class="bg-grid" aria-hidden="true"></div>
   <div class="bg-glow" aria-hidden="true"></div>
+  <div class="bg-orbs" aria-hidden="true">
+    <span class="orb orb-1"></span>
+    <span class="orb orb-2"></span>
+    <span class="orb orb-3"></span>
+  </div>
 
   <!-- NAV -->
   <header class="nav">
@@ -28,8 +35,10 @@
     </a>
     <nav class="nav-links">
       <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#layouts">Layouts</a>
       <a href="#models">Models</a>
-      <a href="#system">Requirements</a>
+      <a href="#faq">FAQ</a>
       <a class="btn btn-ghost" href="#download">Download</a>
     </nav>
   </header>
@@ -37,8 +46,8 @@
   <!-- HERO -->
   <main id="top">
     <section class="hero">
-      <div class="hero-copy">
-        <span class="eyebrow">● Multi-Model AI Cockpit</span>
+      <div class="hero-copy" data-reveal>
+        <span class="eyebrow">● Multi-Model AI Cockpit · v1.0.11</span>
         <h1>Run <span class="g-codex">Codex</span>, <span class="g-claude">Claude</span> &amp;
           <span class="g-gemini">Gemini</span><br />side by side.</h1>
         <p class="lede">
@@ -48,115 +57,268 @@
         </p>
         <div class="cta-row" id="download">
           <a class="btn btn-primary" href="/downloads/GenNal-Setup-1.0.11.exe" download>
-            <span class="dl-icon">⬇</span>
+            <span class="dl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg></span>
             Download for Windows
             <small>.exe · 64-bit</small>
           </a>
           <a class="btn btn-primary" href="/downloads/GenNal-1.0.11-arm64.dmg" download>
-            <span class="dl-icon">⬇</span>
+            <span class="dl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg></span>
             Download for macOS
             <small>.dmg · Apple Silicon</small>
           </a>
           <a class="btn btn-primary" href="https://github.com/Gen-Group/GenNal/releases/download/v1.0.11/GenNal-1.0.11.AppImage">
-            <span class="dl-icon">⬇</span>
+            <span class="dl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg></span>
             Download for Linux
             <small>.AppImage · 64-bit</small>
           </a>
-          <a class="btn btn-ghost" href="#features">See how it works</a>
+          <a class="btn btn-ghost" href="#how">See how it works</a>
         </div>
-        <p class="meta-line">Free · Windows 10/11 · macOS 11+ · Linux · No API keys required <span class="ver">v1.0.11</span></p>
+        <p class="meta-line">Free · Windows 10/11 · macOS 11+ · Linux · No API keys required</p>
         <p class="meta-line">Intel Mac? <a href="/downloads/GenNal-1.0.11-x64.dmg" download>Download the Intel build</a>.</p>
       </div>
 
-      <!-- App mock -->
-      <div class="hero-shot" aria-hidden="true">
-        <div class="window">
+      <!-- App mock with live 3D tilt -->
+      <div class="hero-shot" data-tilt aria-hidden="true">
+        <div class="window" data-tilt-inner>
+          <div class="window-glare"></div>
           <div class="window-bar">
             <img class="brand-mark sm" src="assets/gennal-logo.png" alt="" /> GenNal
             <span class="win-dots"><i></i><i></i><i></i></span>
           </div>
           <div class="window-body">
-            <div class="pane pane-codex"><span class="dot"></span>Codex<small>codex-cli</small></div>
-            <div class="pane pane-claude"><span class="dot"></span>Claude<small>claude-code</small></div>
-            <div class="pane pane-gemini"><span class="dot"></span>Gemini<small>gemini-cli</small></div>
-            <div class="pane pane-custom"><span class="dot"></span>Custom<small>shell</small></div>
+            <div class="pane pane-codex" style="--d:1">
+              <span class="dot"></span>Codex<small>codex-cli</small>
+              <span class="pane-status">running</span>
+            </div>
+            <div class="pane pane-claude" style="--d:2">
+              <span class="dot"></span>Claude<small>claude-code</small>
+              <span class="pane-status">running</span>
+            </div>
+            <div class="pane pane-gemini" style="--d:2">
+              <span class="dot"></span>Gemini<small>gemini-cli</small>
+              <span class="pane-status">running</span>
+            </div>
+            <div class="pane pane-custom" style="--d:1">
+              <span class="dot"></span>Custom<small>shell</small>
+              <span class="pane-status">idle</span>
+            </div>
+          </div>
+          <div class="window-foot">
+            <span class="chip-broadcast">📡 Broadcast → 3 models</span>
+            <span class="sys-mini"><b>CPU</b> 42% · <b>MEM</b> 9.1 GB</span>
           </div>
         </div>
+        <span class="float-badge fb-1">⚡ Live PTY</span>
+        <span class="float-badge fb-2">🗂 Shared workspace</span>
       </div>
+    </section>
+
+    <!-- STATS BAR -->
+    <section class="stats" data-reveal>
+      <div class="stat" data-tilt><b>4+</b><span>models in one window</span></div>
+      <div class="stat" data-tilt><b>1</b><span>prompt → broadcast to all</span></div>
+      <div class="stat" data-tilt><b>0</b><span>extra API keys needed</span></div>
+      <div class="stat" data-tilt><b>3</b><span>platforms supported</span></div>
     </section>
 
     <!-- FEATURES -->
     <section id="features" class="section">
-      <h2 class="section-title">Everything to manage many models at once</h2>
+      <p class="kicker" data-reveal>Features</p>
+      <h2 class="section-title" data-reveal>Everything to manage many models at once</h2>
       <div class="grid-cards">
-        <article class="card">
-          <div class="card-ico">▦</div>
+        <article class="card" data-reveal data-tilt style="--ico:#8b6dff">
+          <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
           <h3>Grid, Tabs, Stack &amp; Float</h3>
           <p>Arrange model sessions any way you like — a 2×2 grid to watch four agents work, or stacked for focus.</p>
         </article>
-        <article class="card">
-          <div class="card-ico">📡</div>
+        <article class="card" data-reveal data-tilt style="--ico:#22d3ee">
+          <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/></svg></div>
           <h3>Broadcast a prompt</h3>
           <p>Type once, send to every selected model. Compare how Codex, Claude, and Gemini each solve the same task.</p>
         </article>
-        <article class="card">
-          <div class="card-ico">⚡</div>
+        <article class="card" data-reveal data-tilt style="--ico:#fbbf24">
+          <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div>
           <h3>Real terminals, real CLIs</h3>
           <p>Each pane is a live PTY running the model's official CLI — full color, interactive prompts, start/stop/restart.</p>
         </article>
-        <article class="card">
-          <div class="card-ico">📊</div>
+        <article class="card" data-reveal data-tilt style="--ico:#34d399">
+          <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
           <h3>Live system overview</h3>
           <p>CPU, memory, and active-model counts at a glance, so three agentic CLIs never quietly choke your laptop.</p>
         </article>
-        <article class="card">
-          <div class="card-ico">🗂</div>
+        <article class="card" data-reveal data-tilt style="--ico:#60a5fa">
+          <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></div>
           <h3>Shared workspaces</h3>
           <p>All sessions share one project root. Switch workspaces and your sessions and layout come right back.</p>
         </article>
-        <article class="card">
-          <div class="card-ico">➕</div>
+        <article class="card" data-reveal data-tilt style="--ico:#f472b6">
+          <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div>
           <h3>Bring your own model</h3>
           <p>Any CLI works. Register a name, command, and args — ollama, aider, or a local script — in one config entry.</p>
+        </article>
+        <article class="card" data-reveal data-tilt style="--ico:#2dd4bf">
+          <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></div>
+          <h3>Per-session controls</h3>
+          <p>Start, stop, restart, or clear any pane independently. A crash in one model never touches the others.</p>
+        </article>
+        <article class="card" data-reveal data-tilt style="--ico:#a78bfa">
+          <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></div>
+          <h3>Native dark cockpit</h3>
+          <p>A focused, low-glare interface built for long sessions — color-coded per model so you never lose your place.</p>
+        </article>
+        <article class="card" data-reveal data-tilt style="--ico:#10b981">
+          <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
+          <h3>Runs fully local</h3>
+          <p>GenNal drives the CLIs already on your machine. Your prompts and code never pass through our servers.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section id="how" class="section">
+      <p class="kicker" data-reveal>How it works</p>
+      <h2 class="section-title" data-reveal>From install to four agents in under a minute</h2>
+      <div class="steps">
+        <article class="step" data-reveal data-tilt>
+          <span class="step-num">1</span>
+          <h3>Install &amp; point at a folder</h3>
+          <p>Download GenNal, open it, and pick your project root. Every model session shares that same workspace.</p>
+        </article>
+        <article class="step" data-reveal data-tilt>
+          <span class="step-num">2</span>
+          <h3>Spin up your models</h3>
+          <p>Launch Codex, Claude, Gemini — or your own CLI — each in its own live terminal pane, side by side.</p>
+        </article>
+        <article class="step" data-reveal data-tilt>
+          <span class="step-num">3</span>
+          <h3>Broadcast &amp; compare</h3>
+          <p>Type one prompt, send it to all of them, and watch each agent solve the task in real time. Pick the best.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- LAYOUTS SHOWCASE -->
+    <section id="layouts" class="section">
+      <p class="kicker" data-reveal>Layouts</p>
+      <h2 class="section-title" data-reveal>Arrange the cockpit your way</h2>
+      <div class="layout-grid">
+        <article class="layout-card" data-reveal data-tilt>
+          <div class="layout-vis vis-grid"><i></i><i></i><i></i><i></i></div>
+          <h3>Grid</h3>
+          <p>Watch every agent at once in an even 2×2 — perfect for head-to-head comparison.</p>
+        </article>
+        <article class="layout-card" data-reveal data-tilt>
+          <div class="layout-vis vis-tabs"><i></i><i></i><i></i><b></b></div>
+          <h3>Tabs</h3>
+          <p>One model at a time, switch instantly. Maximum focus on a single agent's output.</p>
+        </article>
+        <article class="layout-card" data-reveal data-tilt>
+          <div class="layout-vis vis-stack"><i></i><i></i><i></i></div>
+          <h3>Stack</h3>
+          <p>Stacked rows for a tall, scannable feed of every running session.</p>
+        </article>
+        <article class="layout-card" data-reveal data-tilt>
+          <div class="layout-vis vis-float"><i></i><i></i></div>
+          <h3>Float</h3>
+          <p>Free-floating windows you can drag and reorder anywhere on the canvas.</p>
         </article>
       </div>
     </section>
 
     <!-- MODELS -->
     <section id="models" class="section">
-      <h2 class="section-title">Works with the tools you already use</h2>
+      <p class="kicker" data-reveal>Models</p>
+      <h2 class="section-title" data-reveal>Works with the tools you already use</h2>
       <div class="model-row">
-        <div class="model-chip g-codex"><b>Codex</b><span>codex</span></div>
-        <div class="model-chip g-claude"><b>Claude</b><span>claude</span></div>
-        <div class="model-chip g-gemini"><b>Gemini</b><span>gemini</span></div>
-        <div class="model-chip g-custom"><b>Custom</b><span>any CLI</span></div>
+        <div class="model-chip g-codex" data-reveal data-tilt><b>Codex</b><span>codex</span></div>
+        <div class="model-chip g-claude" data-reveal data-tilt><b>Claude</b><span>claude</span></div>
+        <div class="model-chip g-gemini" data-reveal data-tilt><b>Gemini</b><span>gemini</span></div>
+        <div class="model-chip g-custom" data-reveal data-tilt><b>Custom</b><span>any CLI</span></div>
       </div>
       <p class="note">Already logged into the CLIs? GenNal just drives them — no extra API keys, no extra billing.</p>
     </section>
 
+    <!-- USE CASES -->
+    <section class="section">
+      <p class="kicker" data-reveal>Use cases</p>
+      <h2 class="section-title" data-reveal>Built for people who run more than one model</h2>
+      <div class="grid-cards usecase-grid">
+        <article class="card" data-reveal data-tilt style="--ico:#fb923c">
+          <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="3" x2="12" y2="21"/><path d="M5 7h14"/><path d="M5 7l-3 6a3 3 0 0 0 6 0z"/><path d="M19 7l-3 6a3 3 0 0 0 6 0z"/></svg></div>
+          <h3>Compare answers</h3>
+          <p>Send the same refactor or bug to three agents and ship whichever solution is cleanest.</p>
+        </article>
+        <article class="card" data-reveal data-tilt style="--ico:#38bdf8">
+          <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 12 12 17 22 12"/><polyline points="2 17 12 22 22 17"/></svg></div>
+          <h3>Parallel building</h3>
+          <p>Let one agent write tests while another implements and a third reviews — all at the same time.</p>
+        </article>
+        <article class="card" data-reveal data-tilt style="--ico:#fb7185">
+          <div class="card-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6"/><path d="M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/><line x1="7" y1="15" x2="17" y2="15"/></svg></div>
+          <h3>Evaluate models</h3>
+          <p>Benchmark how each CLI handles your real codebase before committing to one for the team.</p>
+        </article>
+      </div>
+    </section>
+
     <!-- SYSTEM -->
     <section id="system" class="section">
-      <h2 class="section-title">System requirements</h2>
+      <p class="kicker" data-reveal>Requirements</p>
+      <h2 class="section-title" data-reveal>System requirements</h2>
       <div class="req-grid">
-        <div class="req"><span>OS</span>Windows 10 / 11 · macOS 11+ · Linux (64-bit)</div>
-        <div class="req"><span>RAM</span>8 GB min · 16 GB recommended</div>
-        <div class="req"><span>Disk</span>500 MB</div>
-        <div class="req"><span>Needs</span>Codex / Claude / Gemini CLI on PATH</div>
+        <div class="req" data-reveal data-tilt><span>OS</span>Windows 10 / 11 · macOS 11+ · Linux (64-bit)</div>
+        <div class="req" data-reveal data-tilt><span>RAM</span>8 GB min · 16 GB recommended</div>
+        <div class="req" data-reveal data-tilt><span>Disk</span>500 MB</div>
+        <div class="req" data-reveal data-tilt><span>Needs</span>Codex / Claude / Gemini CLI on PATH</div>
       </div>
-      <div class="download-band">
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq" class="section">
+      <p class="kicker" data-reveal>FAQ</p>
+      <h2 class="section-title" data-reveal>Questions, answered</h2>
+      <div class="faq">
+        <details class="faq-item" data-reveal data-tilt>
+          <summary>Do I need API keys to use GenNal?</summary>
+          <p>No. GenNal drives the official CLIs you've already installed and logged into — Codex, Claude, and Gemini. There are no extra API keys and no extra billing on our side.</p>
+        </details>
+        <details class="faq-item" data-reveal data-tilt>
+          <summary>Does my code or prompts go through your servers?</summary>
+          <p>No. Everything runs locally. GenNal is a cockpit around the CLIs on your own machine; your prompts and code go straight to whichever model CLI you're using.</p>
+        </details>
+        <details class="faq-item" data-reveal data-tilt>
+          <summary>Can I add a model that isn't listed?</summary>
+          <p>Yes. Any command-line tool works. Register a name, command, and args — ollama, aider, or a local script — and it gets its own live pane like the built-ins.</p>
+        </details>
+        <details class="faq-item" data-reveal data-tilt>
+          <summary>What platforms are supported?</summary>
+          <p>Windows 10/11, macOS 11+ (Apple Silicon and Intel builds), and Linux as an AppImage. All 64-bit.</p>
+        </details>
+        <details class="faq-item" data-reveal data-tilt>
+          <summary>Is it free?</summary>
+          <p>Yes, GenNal is free to download and use.</p>
+        </details>
+      </div>
+    </section>
+
+    <!-- DOWNLOAD BAND -->
+    <section class="section">
+      <div class="download-band" data-reveal data-tilt>
         <div>
           <h3>Ready to run them all at once?</h3>
           <p>Download GenNal and launch your first multi-model workspace in under a minute.</p>
         </div>
-        <a class="btn btn-primary" href="/downloads/GenNal-Setup-1.0.11.exe" download>
-          <span class="dl-icon">⬇</span> Download for Windows <small>.exe</small>
-        </a>
-        <a class="btn btn-primary" href="/downloads/GenNal-1.0.11-arm64.dmg" download>
-          <span class="dl-icon">⬇</span> Download for macOS <small>.dmg</small>
-        </a>
-        <a class="btn btn-primary" href="https://github.com/Gen-Group/GenNal/releases/download/v1.0.11/GenNal-1.0.11.AppImage">
-          <span class="dl-icon">⬇</span> Download for Linux <small>.AppImage</small>
-        </a>
+        <div class="band-btns">
+          <a class="btn btn-primary" href="/downloads/GenNal-Setup-1.0.11.exe" download>
+            <span class="dl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg></span> Windows <small>.exe</small>
+          </a>
+          <a class="btn btn-primary" href="/downloads/GenNal-1.0.11-arm64.dmg" download>
+            <span class="dl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg></span> macOS <small>.dmg</small>
+          </a>
+          <a class="btn btn-primary" href="https://github.com/Gen-Group/GenNal/releases/download/v1.0.11/GenNal-1.0.11.AppImage">
+            <span class="dl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg></span> Linux <small>.AppImage</small>
+          </a>
+        </div>
       </div>
     </section>
   </main>
@@ -166,12 +328,46 @@
     <span>© <span id="year"></span> GenNal · Multi-Model AI Cockpit</span>
     <span class="footer-links">
       <a href="#features">Features</a>
+      <a href="#how">How it works</a>
       <a href="#download">Download</a>
       <a href="https://github.com/chydevit" target="_blank" rel="noopener noreferrer">GitHub</a>
       <a href="https://x.com/ChyDevit54942" target="_blank" rel="noopener noreferrer">X</a>
     </span>
   </footer>
 
-  <script>document.getElementById('year').textContent = new Date().getFullYear();</script>
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    // Scroll-reveal
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+      }
+    }, { threshold: 0.12 });
+    document.querySelectorAll('[data-reveal]').forEach((el, i) => {
+      el.style.transitionDelay = (i % 6) * 60 + 'ms';
+      io.observe(el);
+    });
+
+    // 3D pointer tilt (respects reduced-motion + touch)
+    const fine = window.matchMedia('(pointer:fine)').matches;
+    const reduce = window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+    if (fine && !reduce) {
+      document.querySelectorAll('[data-tilt]').forEach((el) => {
+        const inner = el.querySelector('[data-tilt-inner]') || el;
+        const max = el.matches('.hero-shot') ? 12 : 7;
+        el.addEventListener('pointermove', (ev) => {
+          const r = el.getBoundingClientRect();
+          const px = (ev.clientX - r.left) / r.width - 0.5;
+          const py = (ev.clientY - r.top) / r.height - 0.5;
+          inner.style.transform =
+            `perspective(1200px) rotateY(${px * max}deg) rotateX(${-py * max}deg) translateZ(0)`;
+          el.style.setProperty('--mx', (px * 100 + 50) + '%');
+          el.style.setProperty('--my', (py * 100 + 50) + '%');
+        });
+        el.addEventListener('pointerleave', () => { inner.style.transform = ''; });
+      });
+    }
+  </script>
 </body>
 </html>

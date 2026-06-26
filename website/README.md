@@ -6,8 +6,8 @@ no dependencies — plain HTML/CSS.
 ## Files
 ```
 website/
-├─ index.html        landing page (hero, features, models, requirements, download)
-├─ styles.css        dark theme matching the app brand
+├─ index.html        landing page (3D hero, stats, features, how-it-works, layouts, models, use-cases, requirements, FAQ, download)
+├─ styles.css        dark 3D theme matching the app brand (pointer-tilt, parallax orbs, scroll-reveal)
 ├─ vercel.json       static-site config (clean URLs + asset caching)
 └─ downloads/        installer drop (gitignored except current release files)
 ```
