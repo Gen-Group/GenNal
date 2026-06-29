@@ -46,6 +46,21 @@ h1,h2,h3{line-height:1.1; letter-spacing:-0.02em; font-weight:800}
   66%{transform:translate(-30px,25px) scale(.95)}
 }
 
+/* tilt: track the pointer instantly while moving, ease back on leave */
+.tilting{transition:transform .07s linear !important}
+
+/* cursor rocket */
+.cursor-rocket{
+  position:fixed; left:0; top:0; z-index:60; width:40px; height:40px;
+  pointer-events:none; opacity:0; transition:opacity .35s ease;
+  will-change:transform; filter:drop-shadow(0 6px 12px #27d9ff55);
+}
+.cursor-rocket.on{opacity:.96}
+.cursor-rocket .flame{transform-origin:12px 22px; animation:rkt-flame .12s steps(2,end) infinite}
+.cursor-rocket.boost .flame{filter:drop-shadow(0 0 7px #ff7a2c)}
+@keyframes rkt-flame{0%{transform:scaleX(.65);opacity:.8}100%{transform:scaleX(1.18);opacity:1}}
+@media (prefers-reduced-motion:reduce){ .cursor-rocket{display:none} }
+
 /* ---------- nav ---------- */
 .nav{
   position:sticky; top:14px; z-index:20;

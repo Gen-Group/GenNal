@@ -26,6 +26,22 @@
     <span class="orb orb-3"></span>
   </div>
 
+  <!-- cursor rocket: chases the pointer, nose toward heading -->
+  <div class="cursor-rocket" aria-hidden="true">
+    <svg viewBox="0 0 44 44" width="40" height="40" fill="none">
+      <g class="flame">
+        <path d="M12 22 L1 17.5 L6 22 L1 26.5 Z" fill="#ff7a2c"/>
+        <path d="M12 22 L5 19.5 L9 22 L5 24.5 Z" fill="#ffd23c"/>
+      </g>
+      <path d="M15 16 L9 10 L14 18 Z" fill="#7c5cff"/>
+      <path d="M15 28 L9 34 L14 26 Z" fill="#7c5cff"/>
+      <path d="M12 22 C12 15 22 13 30 16 C34 17.5 36 20 36 22 C36 24 34 26.5 30 28 C22 31 12 29 12 22 Z" fill="#e9eefb"/>
+      <path d="M30 16 C34 17.5 38.5 20 40 22 C38.5 24 34 26.5 30 28 Z" fill="#27d9ff"/>
+      <circle cx="26" cy="22" r="3.4" fill="#0a0c14"/>
+      <circle cx="26" cy="22" r="2" fill="#27d9ff"/>
+    </svg>
+  </div>
+
   <!-- NAV -->
   <header class="nav">
     <a class="brand" href="#top">
@@ -368,17 +384,57 @@
       document.querySelectorAll('[data-tilt]').forEach((el) => {
         const inner = el.querySelector('[data-tilt-inner]') || el;
         const max = el.matches('.hero-shot') ? 12 : 7;
-        el.addEventListener('pointermove', (ev) => {
+        // rAF-throttle so we paint at most once per frame — kills the lag that
+        // came from writing the transform on every pointermove event.
+        let raf = 0, last = null;
+        const paint = () => {
+          raf = 0;
+          if (!last) return;
           const r = el.getBoundingClientRect();
-          const px = (ev.clientX - r.left) / r.width - 0.5;
-          const py = (ev.clientY - r.top) / r.height - 0.5;
+          const px = (last.x - r.left) / r.width - 0.5;
+          const py = (last.y - r.top) / r.height - 0.5;
           inner.style.transform =
             `perspective(1200px) rotateY(${px * max}deg) rotateX(${-py * max}deg) translateZ(0)`;
           el.style.setProperty('--mx', (px * 100 + 50) + '%');
           el.style.setProperty('--my', (py * 100 + 50) + '%');
+        };
+        el.addEventListener('pointermove', (ev) => {
+          last = { x: ev.clientX, y: ev.clientY };
+          inner.classList.add('tilting');     // snappy transition while tracking
+          if (!raf) raf = requestAnimationFrame(paint);
         });
-        el.addEventListener('pointerleave', () => { inner.style.transform = ''; });
+        el.addEventListener('pointerleave', () => {
+          last = null;
+          if (raf) { cancelAnimationFrame(raf); raf = 0; }
+          inner.classList.remove('tilting');   // ease back to rest
+          inner.style.transform = '';
+        });
       });
+
+      // Cursor rocket: lerp toward the pointer and rotate to face its heading.
+      const rocket = document.querySelector('.cursor-rocket');
+      if (rocket) {
+        let tx = innerWidth / 2, ty = innerHeight / 2;   // target (pointer)
+        let rxp = tx, ryp = ty, angle = 0;               // rocket pose
+        let hideT = 0;
+        addEventListener('pointermove', (e) => {
+          tx = e.clientX; ty = e.clientY;
+          rocket.classList.add('on');
+          clearTimeout(hideT);
+          hideT = setTimeout(() => rocket.classList.remove('on'), 1500);
+        }, { passive: true });
+        addEventListener('pointerdown', () => rocket.classList.add('boost'));
+        addEventListener('pointerup', () => rocket.classList.remove('boost'));
+        const fly = () => {
+          const dx = tx - rxp, dy = ty - ryp;
+          rxp += dx * 0.14; ryp += dy * 0.14;
+          if (Math.hypot(dx, dy) > 2) angle = Math.atan2(dy, dx) * 180 / Math.PI;
+          rocket.style.transform =
+            `translate(${rxp}px, ${ryp}px) translate(-50%, -50%) rotate(${angle}deg)`;
+          requestAnimationFrame(fly);
+        };
+        requestAnimationFrame(fly);
+      }
     }
   </script>
 </body>
