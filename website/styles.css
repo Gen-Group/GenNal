@@ -263,6 +263,17 @@ h1,h2,h3{line-height:1.1; letter-spacing:-0.02em; font-weight:800}
 }
 .card h3{font-size:17.5px; margin-bottom:8px}
 .card p{font-size:14.5px; color:var(--muted)}
+/* "New" badge for freshly shipped features */
+.card-new{
+  position:absolute; top:16px; right:16px; z-index:2;
+  font-size:11px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
+  color:#fff; padding:4px 10px; border-radius:999px;
+  background:linear-gradient(150deg,
+    color-mix(in srgb,var(--ico) 88%,#000),
+    color-mix(in srgb,var(--ico) 52%,#000));
+  border:1px solid color-mix(in srgb,var(--ico) 60%,#fff);
+  box-shadow:0 8px 18px -8px color-mix(in srgb,var(--ico) 80%,transparent), inset 0 1px 0 #ffffff55;
+}
 .usecase-grid{grid-template-columns:repeat(3,1fr)}
 
 /* ---------- steps ---------- */
