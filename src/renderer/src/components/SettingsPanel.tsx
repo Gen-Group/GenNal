@@ -555,6 +555,142 @@ function comboParts(keys: string): string[] {
   return keys.split('+').map((part) => KEY_GLYPHS[part] ?? part)
 }
 
+// ---- Generic local persistence (shared by the simple toggle/option sections) ----
+function loadJSON<T extends object>(key: string, fallback: T): T {
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw) as Partial<T>
+    return { ...fallback, ...parsed }
+  } catch {
+    return fallback
+  }
+}
+
+function saveJSON(key: string, value: unknown): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+// ---- Integrations ----
+interface IntegrationSettings {
+  github: boolean
+  linear: boolean
+  slack: boolean
+  webhooks: boolean
+}
+const INTEGRATIONS_STORAGE = 'gennal.integrations'
+const DEFAULT_INTEGRATIONS: IntegrationSettings = {
+  github: false,
+  linear: false,
+  slack: false,
+  webhooks: false
+}
+const INTEGRATION_META: {
+  key: keyof IntegrationSettings
+  title: string
+  description: string
+  short: string
+  color: string
+}[] = [
+  { key: 'github', title: 'GitHub', description: 'Link issues, pull requests, and repository status to your sessions.', short: 'GH', color: '#6e7681' },
+  { key: 'linear', title: 'Linear', description: 'Pull assigned issues into the task inbox and push updates back.', short: 'LN', color: '#5e6ad2' },
+  { key: 'slack', title: 'Slack', description: 'Post run results and agent completions to a channel.', short: 'SL', color: '#611f69' },
+  { key: 'webhooks', title: 'Webhooks', description: 'Send a JSON payload to a custom URL when a run finishes.', short: 'WH', color: '#0ea5e9' }
+]
+
+// ---- Git & source control ----
+type AutoFetchInterval = 'off' | '5m' | '15m' | '30m'
+interface SourceSettings {
+  autoFetch: AutoFetchInterval
+  showInlineDiff: boolean
+  confirmBeforePush: boolean
+  autoStageOnCommit: boolean
+  pruneOnFetch: boolean
+  fetchTags: boolean
+}
+const SOURCE_STORAGE = 'gennal.sourceControl'
+const DEFAULT_SOURCE: SourceSettings = {
+  autoFetch: 'off',
+  showInlineDiff: true,
+  confirmBeforePush: true,
+  autoStageOnCommit: false,
+  pruneOnFetch: true,
+  fetchTags: true
+}
+
+// ---- Floating workspace ----
+interface FloatingSettings {
+  alwaysOnTop: boolean
+  snapToEdges: boolean
+  rememberPositions: boolean
+  opacity: number
+}
+const FLOATING_STORAGE = 'gennal.floatingWorkspace'
+const DEFAULT_FLOATING: FloatingSettings = {
+  alwaysOnTop: false,
+  snapToEdges: true,
+  rememberPositions: true,
+  opacity: 100
+}
+
+// ---- Quick commands ----
+interface QuickCommand {
+  id: string
+  name: string
+  command: string
+}
+const COMMANDS_STORAGE = 'gennal.quickCommands'
+function loadQuickCommands(): QuickCommand[] {
+  try {
+    const raw = window.localStorage.getItem(COMMANDS_STORAGE)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as Partial<QuickCommand>[]
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((c) => typeof c?.command === 'string' && c.command)
+      .map((c) => ({
+        id: typeof c.id === 'string' ? c.id : newId(),
+        name: typeof c.name === 'string' && c.name ? c.name : String(c.command),
+        command: String(c.command)
+      }))
+  } catch {
+    return []
+  }
+}
+
+// ---- SSH hosts ----
+interface SshHost {
+  id: string
+  name: string
+  host: string
+  user: string
+  port: string
+}
+const SSH_STORAGE = 'gennal.sshHosts'
+function loadSshHosts(): SshHost[] {
+  try {
+    const raw = window.localStorage.getItem(SSH_STORAGE)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as Partial<SshHost>[]
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((h) => typeof h?.host === 'string' && h.host)
+      .map((h) => ({
+        id: typeof h.id === 'string' ? h.id : newId(),
+        name: typeof h.name === 'string' && h.name ? h.name : String(h.host),
+        host: String(h.host),
+        user: typeof h.user === 'string' ? h.user : '',
+        port: typeof h.port === 'string' && h.port ? h.port : '22'
+      }))
+  } catch {
+    return []
+  }
+}
+
 export default function SettingsPanel(): JSX.Element | null {
   const open = useStore((s) => s.settingsOpen)
   const toggleSettings = useStore((s) => s.toggleSettings)
@@ -622,6 +758,102 @@ export default function SettingsPanel(): JSX.Element | null {
   const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatus>('all')
   const [recordingId, setRecordingId] = useState<string | null>(null)
   const [terminalPrecedence, setTerminalPrecedence] = useState<TerminalPrecedence>(loadTerminalPrecedence)
+  const [navQuery, setNavQuery] = useState('')
+  const [integrations, setIntegrations] = useState<IntegrationSettings>(() =>
+    loadJSON(INTEGRATIONS_STORAGE, DEFAULT_INTEGRATIONS)
+  )
+  const [sourceSettings, setSourceSettings] = useState<SourceSettings>(() =>
+    loadJSON(SOURCE_STORAGE, DEFAULT_SOURCE)
+  )
+  const [floatingSettings, setFloatingSettings] = useState<FloatingSettings>(() =>
+    loadJSON(FLOATING_STORAGE, DEFAULT_FLOATING)
+  )
+  const [commands, setCommands] = useState<QuickCommand[]>(loadQuickCommands)
+  const [commandDraft, setCommandDraft] = useState({ name: '', command: '' })
+  const [commandError, setCommandError] = useState('')
+  const [sshHosts, setSshHosts] = useState<SshHost[]>(loadSshHosts)
+  const [sshDraft, setSshDraft] = useState({ name: '', host: '', user: '', port: '22' })
+  const [sshError, setSshError] = useState('')
+
+  const updateIntegration = (key: keyof IntegrationSettings, value: boolean): void => {
+    setIntegrations((prev) => {
+      const next = { ...prev, [key]: value }
+      saveJSON(INTEGRATIONS_STORAGE, next)
+      return next
+    })
+  }
+
+  const updateSource = <Key extends keyof SourceSettings>(key: Key, value: SourceSettings[Key]): void => {
+    setSourceSettings((prev) => {
+      const next = { ...prev, [key]: value }
+      saveJSON(SOURCE_STORAGE, next)
+      return next
+    })
+  }
+
+  const updateFloating = <Key extends keyof FloatingSettings>(
+    key: Key,
+    value: FloatingSettings[Key]
+  ): void => {
+    setFloatingSettings((prev) => {
+      const next = { ...prev, [key]: value }
+      saveJSON(FLOATING_STORAGE, next)
+      return next
+    })
+  }
+
+  const persistCommands = (next: QuickCommand[]): void => {
+    saveJSON(COMMANDS_STORAGE, next)
+    setCommands(next)
+  }
+
+  const addCommand = (event?: FormEvent<HTMLFormElement>): void => {
+    event?.preventDefault()
+    const command = commandDraft.command.trim()
+    if (!command) {
+      setCommandError('Enter a command to run.')
+      return
+    }
+    const name = commandDraft.name.trim() || command
+    persistCommands([...commands, { id: newId(), name, command }])
+    setCommandDraft({ name: '', command: '' })
+    setCommandError('')
+  }
+
+  const removeCommand = (id: string): void => {
+    persistCommands(commands.filter((c) => c.id !== id))
+  }
+
+  const persistSshHosts = (next: SshHost[]): void => {
+    saveJSON(SSH_STORAGE, next)
+    setSshHosts(next)
+  }
+
+  const addSshHost = (event?: FormEvent<HTMLFormElement>): void => {
+    event?.preventDefault()
+    const host = sshDraft.host.trim()
+    if (!host) {
+      setSshError('Enter a host name or IP address.')
+      return
+    }
+    const port = sshDraft.port.trim() || '22'
+    if (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
+      setSshError('Port must be a number between 1 and 65535.')
+      return
+    }
+    persistSshHosts([
+      ...sshHosts,
+      { id: newId(), name: sshDraft.name.trim() || host, host, user: sshDraft.user.trim(), port }
+    ])
+    setSshDraft({ name: '', host: '', user: '', port: '22' })
+    setSshError('')
+  }
+
+  const removeSshHost = (id: string): void => {
+    persistSshHosts(sshHosts.filter((h) => h.id !== id))
+  }
+
+  const integrationCount = INTEGRATION_META.filter((item) => integrations[item.key]).length
 
   const updateShortcut = (id: string, keys: string): void => {
     setShortcuts((prev) => {
@@ -730,6 +962,25 @@ export default function SettingsPanel(): JSX.Element | null {
   const activeGroup = GROUPS.find((group) => group.items.some((item) => item.id === active))
   const activeItem = activeGroup?.items.find((item) => item.id === active)
   const activeTaskSourceCount = taskSettings.sources.filter((source) => source.enabled).length
+
+  // ---- sidebar search ----
+  const navQ = navQuery.trim().toLowerCase()
+  const visibleGroups = GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter(
+      (item) =>
+        !navQ ||
+        item.label.toLowerCase().includes(navQ) ||
+        group.title.toLowerCase().includes(navQ)
+    )
+  })).filter((group) => group.items.length > 0)
+  const visibleProjects = recentProjects.filter((project) => {
+    if (!navQ) return true
+    const ps = projectSettings[project.path.toLowerCase()]
+    const label = ps?.displayName?.trim() || project.name
+    return label.toLowerCase().includes(navQ) || 'projects'.includes(navQ)
+  })
+  const navHasResults = visibleGroups.length > 0 || visibleProjects.length > 0
 
   // ---- derived shortcut data ----
   const shortcutKeyCounts = new Map<string, number>()
@@ -910,7 +1161,32 @@ export default function SettingsPanel(): JSX.Element | null {
       >
         <aside className="settings-nav">
           <div className="settings-nav-title">Settings</div>
-          {GROUPS.map((group) => (
+          <div className="settings-nav-search">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.5" />
+              <path d="M10.5 10.5 14 14" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search settings"
+              value={navQuery}
+              aria-label="Search settings"
+              onChange={(event) => setNavQuery(event.target.value)}
+            />
+            {navQuery && (
+              <button
+                className="settings-nav-search-clear"
+                aria-label="Clear search"
+                onClick={() => setNavQuery('')}
+              >
+                ×
+              </button>
+            )}
+          </div>
+          {!navHasResults && (
+            <div className="settings-nav-empty">No settings match “{navQuery}”.</div>
+          )}
+          {visibleGroups.map((group) => (
             <div className="settings-group" key={group.title}>
               <div className="settings-group-title">{group.title}</div>
               {group.items.map((item) => (
@@ -930,10 +1206,10 @@ export default function SettingsPanel(): JSX.Element | null {
             </div>
           ))}
 
-          {recentProjects.length > 0 && (
+          {visibleProjects.length > 0 && (
             <div className="settings-group" key="projects">
               <div className="settings-group-title">Projects</div>
-              {recentProjects.map((project) => {
+              {visibleProjects.map((project) => {
                 const isActive =
                   active === 'project' && projectPath?.toLowerCase() === project.path.toLowerCase()
                 const ps = projectSettings[project.path.toLowerCase()]
@@ -2349,6 +2625,364 @@ export default function SettingsPanel(): JSX.Element | null {
                 computer — only pair devices you trust. Sharing keeps running in the background until you
                 choose “Stop sharing” or quit GenNal.
               </p>
+            </div>
+          ) : active === 'integrations' ? (
+            <div className="settings-content">
+              <div className="settings-summary-grid">
+                <div className="settings-summary">
+                  <span>Connected</span>
+                  <strong>{integrationCount}/{INTEGRATION_META.length}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Status</span>
+                  <strong>{integrationCount > 0 ? 'Active' : 'None'}</strong>
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div>
+                  <h3>Connect your tools</h3>
+                  <p>Enable the services GenNal can read issues, push results, and trigger runs from.</p>
+                </div>
+              </div>
+
+              {INTEGRATION_META.map((item) => {
+                const on = integrations[item.key]
+                return (
+                  <div className="settings-card" key={item.key}>
+                    <div>
+                      <h3 className="settings-card-title">
+                        <span className="integration-mark" style={{ background: item.color }}>{item.short}</span>
+                        {item.title}
+                      </h3>
+                      <p>{item.description}</p>
+                    </div>
+                    <button
+                      className={`task-toggle ${on ? 'on' : ''}`}
+                      aria-pressed={on}
+                      aria-label={item.title}
+                      onClick={() => updateIntegration(item.key, !on)}
+                    >
+                      <span />
+                    </button>
+                  </div>
+                )
+              })}
+
+              <p className="remote-note">Integration preferences are stored locally on this device.</p>
+            </div>
+          ) : active === 'source' ? (
+            <div className="settings-content">
+              <div className="settings-summary-grid">
+                <div className="settings-summary">
+                  <span>Repository</span>
+                  <strong>{workspace?.kind === 'project' ? workspace.name : 'None'}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Auto-fetch</span>
+                  <strong>{sourceSettings.autoFetch === 'off' ? 'Off' : `Every ${sourceSettings.autoFetch}`}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Push guard</span>
+                  <strong>{sourceSettings.confirmBeforePush ? 'On' : 'Off'}</strong>
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div>
+                  <h3>Auto-fetch</h3>
+                  <p>How often GenNal fetches the remote in the background for the active repository.</p>
+                </div>
+                <div className="settings-segment">
+                  {([['off', 'Off'], ['5m', '5 min'], ['15m', '15 min'], ['30m', '30 min']] as const).map(([id, label]) => (
+                    <button key={id} className={sourceSettings.autoFetch === id ? 'active' : ''} onClick={() => updateSource('autoFetch', id)}>{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-card task-options-card">
+                <div>
+                  <h3>Behavior</h3>
+                  <p>How GenNal handles diffs, staging, and pushes for source control.</p>
+                </div>
+                <div className="task-option-list">
+                  <label className="task-check">
+                    <input type="checkbox" checked={sourceSettings.showInlineDiff} onChange={(e) => updateSource('showInlineDiff', e.target.checked)} />
+                    <span>Show inline diffs in the editor</span>
+                  </label>
+                  <label className="task-check">
+                    <input type="checkbox" checked={sourceSettings.confirmBeforePush} onChange={(e) => updateSource('confirmBeforePush', e.target.checked)} />
+                    <span>Confirm before pushing to a remote</span>
+                  </label>
+                  <label className="task-check">
+                    <input type="checkbox" checked={sourceSettings.autoStageOnCommit} onChange={(e) => updateSource('autoStageOnCommit', e.target.checked)} />
+                    <span>Stage all changes automatically on commit</span>
+                  </label>
+                  <label className="task-check">
+                    <input type="checkbox" checked={sourceSettings.pruneOnFetch} onChange={(e) => updateSource('pruneOnFetch', e.target.checked)} />
+                    <span>Prune deleted remote branches on fetch</span>
+                  </label>
+                  <label className="task-check">
+                    <input type="checkbox" checked={sourceSettings.fetchTags} onChange={(e) => updateSource('fetchTags', e.target.checked)} />
+                    <span>Fetch tags along with branches</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="settings-card">
+                <div>
+                  <h3>Reset source control preferences</h3>
+                  <p>Restore the default git fetch and behavior settings.</p>
+                </div>
+                <button
+                  className="settings-close danger"
+                  onClick={() => {
+                    saveJSON(SOURCE_STORAGE, DEFAULT_SOURCE)
+                    setSourceSettings(DEFAULT_SOURCE)
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+
+              <p className="remote-note">Source control preferences are stored locally on this device.</p>
+            </div>
+          ) : active === 'commands' ? (
+            <div className="settings-content">
+              <div className="settings-summary-grid">
+                <div className="settings-summary">
+                  <span>Saved</span>
+                  <strong>{commands.length}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Status</span>
+                  <strong>{commands.length > 0 ? 'Ready' : 'Empty'}</strong>
+                </div>
+              </div>
+
+              <div className="settings-card remote-add-card">
+                <div>
+                  <h3>Add a quick command</h3>
+                  <p>Save shell commands you run often so they are one click away in the command palette.</p>
+                </div>
+                <form className="remote-form" onSubmit={addCommand}>
+                  <div className="remote-form-row">
+                    <input
+                      aria-label="Command name"
+                      placeholder="Name (e.g. Run tests)"
+                      value={commandDraft.name}
+                      maxLength={48}
+                      onChange={(e) => {
+                        setCommandDraft((d) => ({ ...d, name: e.target.value }))
+                        if (commandError) setCommandError('')
+                      }}
+                    />
+                    <input
+                      aria-label="Command"
+                      placeholder="npm test"
+                      value={commandDraft.command}
+                      aria-invalid={Boolean(commandError)}
+                      onChange={(e) => {
+                        setCommandDraft((d) => ({ ...d, command: e.target.value }))
+                        if (commandError) setCommandError('')
+                      }}
+                    />
+                  </div>
+                  <div className="remote-form-row">
+                    <span />
+                    <button className="remote-add-btn" type="submit">Save command</button>
+                  </div>
+                  {commandError && <p className="remote-error">{commandError}</p>}
+                </form>
+              </div>
+
+              {commands.length === 0 ? (
+                <div className="settings-placeholder remote-empty">
+                  <h3>No quick commands yet</h3>
+                  <p>Add a command above to keep your most-used shell commands handy.</p>
+                </div>
+              ) : (
+                <div className="remote-list" aria-label="Quick commands">
+                  {commands.map((command) => (
+                    <div className="remote-card" key={command.id}>
+                      <div className="remote-copy">
+                        <div className="remote-card-head">
+                          <h3>{command.name}</h3>
+                        </div>
+                        <p className="quick-command-code">{command.command}</p>
+                      </div>
+                      <div className="remote-card-actions">
+                        <button
+                          className="remote-connect"
+                          onClick={() => window.api.writeClipboardText(command.command)}
+                          title="Copy command"
+                        >
+                          Copy
+                        </button>
+                        <button
+                          className="remote-remove"
+                          title="Remove command"
+                          aria-label={`Remove ${command.name}`}
+                          onClick={() => removeCommand(command.id)}
+                        >
+                          <svg viewBox="0 0 14 14" width="13" height="13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+                            <path d="M3.5 3.5 L10.5 10.5 M10.5 3.5 L3.5 10.5" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <p className="remote-note">Quick commands are stored locally on this device.</p>
+            </div>
+          ) : active === 'floating' ? (
+            <div className="settings-content">
+              <div className="settings-card">
+                <div>
+                  <h3>Window opacity</h3>
+                  <p>Transparency of floating model windows so you can see content behind them.</p>
+                </div>
+                <div className="settings-segment">
+                  {[100, 95, 90, 80].map((value) => (
+                    <button key={value} className={floatingSettings.opacity === value ? 'active' : ''} onClick={() => updateFloating('opacity', value)}>{value}%</button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="settings-card task-options-card">
+                <div>
+                  <h3>Behavior</h3>
+                  <p>How floating windows snap, stack, and restore between launches.</p>
+                </div>
+                <div className="task-option-list">
+                  <label className="task-check">
+                    <input type="checkbox" checked={floatingSettings.alwaysOnTop} onChange={(e) => updateFloating('alwaysOnTop', e.target.checked)} />
+                    <span>Keep floating windows above other apps</span>
+                  </label>
+                  <label className="task-check">
+                    <input type="checkbox" checked={floatingSettings.snapToEdges} onChange={(e) => updateFloating('snapToEdges', e.target.checked)} />
+                    <span>Snap windows to screen edges while dragging</span>
+                  </label>
+                  <label className="task-check">
+                    <input type="checkbox" checked={floatingSettings.rememberPositions} onChange={(e) => updateFloating('rememberPositions', e.target.checked)} />
+                    <span>Remember window positions between launches</span>
+                  </label>
+                </div>
+              </div>
+
+              <p className="remote-note">Floating workspace preferences are stored locally on this device.</p>
+            </div>
+          ) : active === 'ssh' ? (
+            <div className="settings-content">
+              <div className="settings-summary-grid">
+                <div className="settings-summary">
+                  <span>Hosts</span>
+                  <strong>{sshHosts.length}</strong>
+                </div>
+                <div className="settings-summary">
+                  <span>Status</span>
+                  <strong>{sshHosts.length > 0 ? 'Saved' : 'Empty'}</strong>
+                </div>
+              </div>
+
+              <div className="settings-card remote-add-card">
+                <div>
+                  <h3>Add an SSH host</h3>
+                  <p>Save the machines you open remote terminals on. Connection details stay on this device.</p>
+                </div>
+                <form className="remote-form" onSubmit={addSshHost}>
+                  <div className="remote-form-row">
+                    <input
+                      aria-label="Host name"
+                      placeholder="Name (e.g. Build box)"
+                      value={sshDraft.name}
+                      maxLength={40}
+                      onChange={(e) => {
+                        setSshDraft((d) => ({ ...d, name: e.target.value }))
+                        if (sshError) setSshError('')
+                      }}
+                    />
+                    <input
+                      aria-label="Host or IP"
+                      placeholder="host or 10.0.0.4"
+                      value={sshDraft.host}
+                      aria-invalid={Boolean(sshError)}
+                      onChange={(e) => {
+                        setSshDraft((d) => ({ ...d, host: e.target.value }))
+                        if (sshError) setSshError('')
+                      }}
+                    />
+                  </div>
+                  <div className="remote-form-row">
+                    <input
+                      aria-label="User"
+                      placeholder="User (e.g. root)"
+                      value={sshDraft.user}
+                      maxLength={40}
+                      onChange={(e) => setSshDraft((d) => ({ ...d, user: e.target.value }))}
+                    />
+                    <input
+                      aria-label="Port"
+                      placeholder="22"
+                      value={sshDraft.port}
+                      inputMode="numeric"
+                      onChange={(e) => {
+                        setSshDraft((d) => ({ ...d, port: e.target.value }))
+                        if (sshError) setSshError('')
+                      }}
+                    />
+                  </div>
+                  <div className="remote-form-row">
+                    <span />
+                    <button className="remote-add-btn" type="submit">Add host</button>
+                  </div>
+                  {sshError && <p className="remote-error">{sshError}</p>}
+                </form>
+              </div>
+
+              {sshHosts.length === 0 ? (
+                <div className="settings-placeholder remote-empty">
+                  <h3>No SSH hosts yet</h3>
+                  <p>Add a host above to keep your remote machines a click away.</p>
+                </div>
+              ) : (
+                <div className="remote-list" aria-label="SSH hosts">
+                  {sshHosts.map((host) => (
+                    <div className="remote-card" key={host.id}>
+                      <div className="remote-copy">
+                        <div className="remote-card-head">
+                          <h3>{host.name}</h3>
+                          <span>Port {host.port}</span>
+                        </div>
+                        <p className="quick-command-code">{host.user ? `${host.user}@` : ''}{host.host}</p>
+                      </div>
+                      <div className="remote-card-actions">
+                        <button
+                          className="remote-connect"
+                          onClick={() => window.api.writeClipboardText(`ssh ${host.user ? `${host.user}@` : ''}${host.host} -p ${host.port}`)}
+                          title="Copy ssh command"
+                        >
+                          Copy
+                        </button>
+                        <button
+                          className="remote-remove"
+                          title="Remove host"
+                          aria-label={`Remove ${host.name}`}
+                          onClick={() => removeSshHost(host.id)}
+                        >
+                          <svg viewBox="0 0 14 14" width="13" height="13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+                            <path d="M3.5 3.5 L10.5 10.5 M10.5 3.5 L3.5 10.5" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <p className="remote-note">SSH hosts are stored locally on this device.</p>
             </div>
           ) : (
             <div className="settings-placeholder">

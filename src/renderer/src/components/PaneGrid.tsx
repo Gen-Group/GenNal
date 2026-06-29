@@ -39,6 +39,7 @@ export default function PaneGrid(): JSX.Element {
   // anchored top-left, without disturbing its neighbours. Sizes live in the
   // store (keyed by session id) so the header buttons and the drag share state.
   const paneSizes = useStore((s) => s.paneSizes)
+  const collapsedIds = useStore((s) => s.collapsedIds)
   const setPaneSize = useStore((s) => s.setPaneSize)
   const resetPaneSizeStore = useStore((s) => s.resetPaneSize)
   const prunePaneSizes = useStore((s) => s.prunePaneSizes)
@@ -57,7 +58,23 @@ export default function PaneGrid(): JSX.Element {
   const focusedId = mine.some((s) => s.id === activeId) ? activeId : mine[0]?.id
   const visibleIds = new Set(tiled ? mine.map((s) => s.id) : focusedId ? [focusedId] : [])
 
-  const grid = fitGrid(mine.length, rows, cols)
+  // Collapsed terminals dock as header-only bars at the bottom of the grid, so
+  // the expanded terminals only have to share the freed-up space. We render
+  // expanded panes first, then the docked bars, then the off-screen sessions
+  // (kept mounted but hidden so their ptys survive) — all as direct children of
+  // the same grid container, so toggling collapse only reorders nodes and never
+  // re-parents a pane (which would unmount it and kill its shell).
+  const collapsedSet = new Set(collapsedIds)
+  const visibleExpanded = sessions.filter((s) => visibleIds.has(s.id) && !collapsedSet.has(s.id))
+  const visibleCollapsed = sessions.filter((s) => visibleIds.has(s.id) && collapsedSet.has(s.id))
+  const offscreen = sessions.filter((s) => !visibleIds.has(s.id))
+  const ordered = [...visibleExpanded, ...visibleCollapsed, ...offscreen]
+
+  // Size the tiled area to the expanded panes only; docked bars flow into
+  // implicit auto-height rows beneath it.
+  const expandedCount = visibleExpanded.length
+  const grid = fitGrid(expandedCount || 1, rows, cols)
+  const hasDock = visibleCollapsed.length > 0
 
   // Drop any per-pane sizes for sessions that have closed, so the map doesn't
   // grow unbounded as terminals come and go.
@@ -112,20 +129,21 @@ export default function PaneGrid(): JSX.Element {
   return (
     <div
       ref={gridRef}
-      className={`pane-grid mode-${mode}`}
+      className={`pane-grid mode-${mode} ${hasDock ? 'has-dock' : ''}`}
       style={{
         gridTemplateColumns: `repeat(${grid.cols}, minmax(0, 1fr))`,
-        gridTemplateRows: `repeat(${grid.rows}, minmax(0, 1fr))`
+        gridTemplateRows: expandedCount > 0 ? `repeat(${grid.rows}, minmax(0, 1fr))` : undefined
       }}
     >
-      {sessions.map((s) => {
+      {ordered.map((s) => {
         const number = mine.findIndex((m) => m.id === s.id) + 1
         const visible = visibleIds.has(s.id)
-        const size = sizeFor(s.id)
+        const isCollapsed = visible && collapsedSet.has(s.id)
+        const size = isCollapsed ? { w: 1, h: 1 } : sizeFor(s.id)
         return (
           <div
             key={s.id}
-            className="pane-cell"
+            className={`pane-cell ${isCollapsed ? 'collapsed-cell' : ''}`}
             style={{ display: visible ? undefined : 'none' }}
           >
             <div
@@ -136,7 +154,7 @@ export default function PaneGrid(): JSX.Element {
               }}
             >
               <ModelPane session={s} hidden={!visible} number={number || undefined} />
-              {tiled && visible && (
+              {tiled && visible && !isCollapsed && (
                 <>
                   <button
                     className="pane-edge-resizer pane-edge-right"

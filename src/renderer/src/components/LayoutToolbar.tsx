@@ -67,6 +67,8 @@ export default function LayoutToolbar(): JSX.Element {
   const setGrid = useStore((s) => s.setGrid)
   const previewCenter = useStore((s) => s.previewCenter)
   const setPreviewCenter = useStore((s) => s.setPreviewCenter)
+  const terminalGridHidden = useStore((s) => s.terminalGridHidden)
+  const toggleTerminalGrid = useStore((s) => s.toggleTerminalGrid)
   const gridValues = [1, 2, 3]
 
   useEffect(() => {
@@ -102,9 +104,13 @@ export default function LayoutToolbar(): JSX.Element {
     <div className="toolbar">
       <div className="seg">
         <button
-          className={`seg-btn ${previewCenter ? '' : 'active'}`}
-          aria-pressed={!previewCenter}
-          onClick={() => setPreviewCenter(false)}
+          className={`seg-btn ${!previewCenter && !terminalGridHidden ? 'active' : ''}`}
+          title={terminalGridHidden ? 'Show terminal sessions' : 'Hide terminal sessions'}
+          aria-pressed={!previewCenter && !terminalGridHidden}
+          onClick={() => {
+            setPreviewCenter(false)
+            toggleTerminalGrid(previewCenter ? false : !terminalGridHidden)
+          }}
         >
           <span className="seg-ico">
             <ModeIcon id="sessions" />
@@ -115,7 +121,10 @@ export default function LayoutToolbar(): JSX.Element {
           className={`seg-btn ${previewCenter ? 'active' : ''}`}
           title="Show the website preview on the main screen"
           aria-pressed={previewCenter}
-          onClick={() => setPreviewCenter(true)}
+          onClick={() => {
+            toggleTerminalGrid(false)
+            setPreviewCenter(true)
+          }}
         >
           <span className="seg-ico">
             <ModeIcon id="preview" />
@@ -126,7 +135,7 @@ export default function LayoutToolbar(): JSX.Element {
 
       <div className="tb-spacer" />
 
-      {!previewCenter && (
+      {!previewCenter && !terminalGridHidden && (
       <div className="grid-dropdowns" ref={menuRef}>
         <div className="grid-select">
           <span className="dim-label">Rows</span>

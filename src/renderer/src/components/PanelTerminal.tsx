@@ -14,6 +14,7 @@ import { useStore, scrollbackLines, windowsShellCommand, activeProjectPath } fro
 import { isLocalhostUrl } from '../preview-links'
 import TerminalFindBar from './TerminalFindBar'
 import { getTerminalTheme } from '../theme-colors'
+import { startPlainTerminalSelection } from '../terminal-selection'
 
 // A single dedicated shell that lives in the right panel's TERMINAL tab.
 // Reuses the same PTY bridge as the model panes; an empty command spawns a
@@ -316,6 +317,19 @@ export default function PanelTerminal({
   }
 
   const onContextMenu = (e: ReactMouseEvent<HTMLDivElement>): void => {
+    const term = terminalRef.current
+    if (term?.hasSelection()) {
+      const selection = term.getSelection()
+      if (selection) {
+        e.preventDefault()
+        window.api.suppressNextContextMenu()
+        window.api.writeClipboardText(selection)
+        term.clearSelection()
+        term.focus()
+        return
+      }
+    }
+
     // Right-clicking a URL opens it (localhost in the in-app preview, others in
     // the system browser).
     const url = hoveredUrlRef.current
@@ -371,7 +385,7 @@ export default function PanelTerminal({
       <div
         className="rp-term-host"
         ref={hostRef}
-        onMouseDown={() => terminalRef.current?.focus()}
+        onMouseDownCapture={(e) => startPlainTerminalSelection(terminalRef.current, e)}
         onPasteCapture={onPaste}
         onContextMenu={onContextMenu}
         onDragOver={onDragOver}

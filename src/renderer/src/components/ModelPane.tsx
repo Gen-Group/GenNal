@@ -17,6 +17,7 @@ import { isLocalhostUrl } from '../preview-links'
 import { playNotificationSound } from '../notification-sound'
 import TerminalFindBar from './TerminalFindBar'
 import { getTerminalTheme } from '../theme-colors'
+import { startPlainTerminalSelection } from '../terminal-selection'
 
 function isTerminalReport(data: string): boolean {
   return /^\x1b\[\?1;2c$/.test(data) || /^\x1b\[\?6c$/.test(data) || /^\x1b\[\d+;\d+R$/.test(data)
@@ -99,6 +100,11 @@ export default function ModelPane({
   const searchRef = useRef<SearchAddon | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   const [splitOpen, setSplitOpen] = useState(false)
+  // Collapse the pane to a header-only bar (docked at the grid bottom by
+  // PaneGrid). The pty keeps running underneath; expanding restores it. State
+  // lives in the store so the grid can lay collapsed panes out separately.
+  const collapsed = useStore((s) => s.collapsedIds.includes(session.id))
+  const toggleSessionCollapsed = useStore((s) => s.toggleSessionCollapsed)
   // Drag the header to reorder panes in the grid. `dropActive` highlights this
   // pane as a drop target; `dragging` dims the one being moved.
   const [dropActive, setDropActive] = useState(false)
@@ -187,11 +193,11 @@ export default function ModelPane({
     fit.fit()
     term.focus()
 
-    const copySelection = (): boolean => {
+    const copySelection = (clear = true): boolean => {
       const selection = term.getSelection()
       if (!selection) return false
       window.api.writeClipboardText(selection)
-      term.clearSelection()
+      if (clear) term.clearSelection()
       return true
     }
 
@@ -500,6 +506,19 @@ export default function ModelPane({
   }
 
   const onPaneContextMenu = (e: MouseEvent<HTMLDivElement>): void => {
+    const term = terminalRef.current
+    if (term?.hasSelection()) {
+      const selection = term.getSelection()
+      if (selection) {
+        e.preventDefault()
+        window.api.suppressNextContextMenu()
+        window.api.writeClipboardText(selection)
+        term.clearSelection()
+        term.focus()
+        return
+      }
+    }
+
     // Right-clicking a URL opens it (localhost in the in-app preview, others in
     // the system browser), regardless of the paste-on-right-click setting.
     const url = hoveredUrlRef.current
@@ -526,7 +545,7 @@ export default function ModelPane({
   return (
     <div
       ref={paneRef}
-      className={`pane ${activeId === session.id ? 'focused' : ''} ${dropActive ? 'pane-drop-target' : ''} ${dragging ? 'pane-dragging' : ''}`}
+      className={`pane ${activeId === session.id ? 'focused' : ''} ${dropActive ? 'pane-drop-target' : ''} ${dragging ? 'pane-dragging' : ''} ${collapsed ? 'pane-collapsed' : ''}`}
       style={{ '--pane-accent': session.accent, display: hidden ? 'none' : undefined } as CSSProperties}
       onMouseDown={focusPane}
       onClick={focusPane}
@@ -590,6 +609,26 @@ export default function ModelPane({
           </div>
           </span>
           <span className="pane-grp">
+          <button
+            className={`pane-act ${collapsed ? 'active' : ''}`}
+            title={collapsed ? 'Show terminal' : 'Hide terminal'}
+            aria-label={collapsed ? 'Show terminal' : 'Hide terminal'}
+            aria-pressed={collapsed}
+            onClick={(e) => actionClick(e, () => toggleSessionCollapsed(session.id))}
+          >
+            {collapsed ? (
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M1.5 8S3.8 3.5 8 3.5 14.5 8 14.5 8 12.2 12.5 8 12.5 1.5 8 1.5 8Z" />
+                <circle cx="8" cy="8" r="2" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M2 2.5 14 13.5" />
+                <path d="M6.4 4.2A6.6 6.6 0 0 1 8 4c4.2 0 6.5 4 6.5 4a11 11 0 0 1-2 2.3M4 5.6A11 11 0 0 0 1.5 8S3.8 12 8 12c.8 0 1.5-.13 2.1-.34" />
+                <path d="M6.6 6.6a2 2 0 0 0 2.8 2.8" />
+              </svg>
+            )}
+          </button>
           <button className="pane-act" title="Send Enter to the shell" aria-label="Send Enter to the shell" onClick={(e) => actionClick(e, () => window.api.ptyInput(session.id, '\r'))}>
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M13 3.5v4a2 2 0 0 1-2 2H3.5" />
@@ -604,7 +643,14 @@ export default function ModelPane({
           </span>
         </span>
       </div>
-      <div className="pane-term" ref={termRef} onMouseDown={focusPane}>
+      <div
+        className="pane-term"
+        ref={termRef}
+        onMouseDownCapture={(e) => {
+          setActive(session.id)
+          startPlainTerminalSelection(terminalRef.current, e)
+        }}
+      >
         {findOpen && searchRef.current && (
           <TerminalFindBar
             search={searchRef.current}

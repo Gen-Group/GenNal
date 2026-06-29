@@ -50,6 +50,20 @@ function limitTone(pct: number): string {
   return 'ok'
 }
 
+/**
+ * Which CLI's usage data backs a model. Built-ins map to themselves; user-added
+ * models that wrap a known CLI (e.g. a custom "claude --resume") resolve to that
+ * CLI so their usage shows real data instead of falling through to "no data".
+ */
+function usageKey(m: ModelDef): string {
+  if (m.id === 'claude' || m.id === 'codex' || m.id === 'gemini') return m.id
+  const hay = `${m.id} ${m.command} ${m.tag}`.toLowerCase()
+  if (hay.includes('claude')) return 'claude'
+  if (hay.includes('codex') || hay.includes('gpt')) return 'codex'
+  if (hay.includes('gemini')) return 'gemini'
+  return m.id
+}
+
 /** "2026-06-29 20:50" — fixed, sortable timestamp used by the Term row. */
 function fmtDateTime(iso: string): string {
   const d = new Date(iso)
@@ -81,7 +95,7 @@ export default function UsageDetail({ model, onBack, onConnect }: Props): JSX.El
     setLoading(true)
     setError('')
     window.api
-      .getUsage(model.id)
+      .getUsage(usageKey(model))
       .then((data) => setUsage(data))
       .catch(() => setError('Could not read usage data.'))
       .finally(() => setLoading(false))

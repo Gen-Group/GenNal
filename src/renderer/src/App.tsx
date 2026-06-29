@@ -10,6 +10,7 @@ import AutomationsPanel from './components/AutomationsPanel'
 import SessionHistoryPanel from './components/SessionHistoryPanel'
 import SimulatorsPanel from './components/SimulatorsPanel'
 import ComputerUsePanel from './components/ComputerUsePanel'
+import WorkspaceBoardPanel from './components/WorkspaceBoardPanel'
 import RightPanel from './components/RightPanel'
 import StatusBar from './components/StatusBar'
 import CommandPalette from './components/CommandPalette'
@@ -39,14 +40,24 @@ export default function App(): JSX.Element {
   const historyOpen = useStore((s) => s.historyOpen)
   const simulatorsOpen = useStore((s) => s.simulatorsOpen)
   const computerUseOpen = useStore((s) => s.computerUseOpen)
+  const boardOpen = useStore((s) => s.boardOpen)
   const previewCenter = useStore((s) => s.previewCenter)
   const tickAutomations = useStore((s) => s.tickAutomations)
   const workspace = useStore((s) => s.workspace)
   const sessions = useStore((s) => s.sessions)
+  const terminalGridHidden = useStore((s) => s.terminalGridHidden)
+  const toggleTerminalGrid = useStore((s) => s.toggleTerminalGrid)
   // The terminal grid is only the visible center content when no feature panel
   // and no centered browser preview is up; otherwise it stays mounted but hidden.
   const workspaceVisible =
-    !tasksOpen && !automationsOpen && !historyOpen && !simulatorsOpen && !computerUseOpen && !previewCenter
+    !terminalGridHidden &&
+    !tasksOpen &&
+    !automationsOpen &&
+    !historyOpen &&
+    !simulatorsOpen &&
+    !computerUseOpen &&
+    !boardOpen &&
+    !previewCenter
   const bodyClasses = [
     'body',
     `panel-${panelSide}`,
@@ -148,10 +159,19 @@ export default function App(): JSX.Element {
             <SimulatorsPanel />
           ) : computerUseOpen ? (
             <ComputerUsePanel />
+          ) : boardOpen ? (
+            <WorkspaceBoardPanel />
           ) : (
             <>
               <LayoutToolbar />
               {previewCenter && <BrowserPreview active center />}
+              {!previewCenter && terminalGridHidden && (
+                <div className="terminal-hidden-state">
+                  <button onClick={() => toggleTerminalGrid(false)}>
+                    Show terminals
+                  </button>
+                </div>
+              )}
             </>
           )}
           <div

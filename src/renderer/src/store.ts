@@ -32,6 +32,30 @@ export interface Session {
   projectPath?: string
 }
 
+/** Workflow columns of the Workspace board (Kanban). */
+export type BoardColumnId = 'todo' | 'in-progress' | 'in-review' | 'done'
+
+/**
+ * A card on the Workspace board. Cards are manual work items, scoped to a
+ * project, that can optionally have a terminal session launched/attached to
+ * them so an agent can work the task in place.
+ */
+export interface BoardCard {
+  id: string
+  title: string
+  notes?: string
+  column: BoardColumnId
+  /** Project the card belongs to (absolute path). Undefined = no-project board. */
+  projectPath?: string
+  /** Terminal session launched from this card, if any. */
+  sessionId?: string
+  /** Model the attached session was launched with. */
+  modelId?: string
+  createdAt: number
+  /** Sort position within its column (ascending). */
+  order: number
+}
+
 export type LayoutMode = 'grid' | 'tabs' | 'stack' | 'float'
 /** Side to place a new terminal relative to the one being split. */
 export type SplitDirection = 'up' | 'down' | 'left' | 'right'
@@ -339,10 +363,13 @@ interface AppState {
   mode: LayoutMode
   /** Per-pane size override (fraction of its grid cell), keyed by session id. */
   paneSizes: Record<string, PaneSize>
+  /** Ids of terminals collapsed to a header-only bar (docked at the grid bottom). */
+  collapsedIds: string[]
   panelSide: PanelSide
   panelWidth: number
   panelOpen: boolean
   panelMaximized: boolean
+  terminalGridHidden: boolean
   codePanelTab: CodePanelTab
   sidebarOpen: boolean
   stats: SystemStats
@@ -358,6 +385,10 @@ interface AppState {
   simulatorsOpen: boolean
   /** Computer Use (AI desktop control) panel is open. */
   computerUseOpen: boolean
+  /** Workspace board (Kanban) panel is open. */
+  boardOpen: boolean
+  /** All board cards across projects; the panel filters to the active project. */
+  boardCards: BoardCard[]
   /** GenNal Mobile pairing dialog (QR code) is open. */
   mobileOpen: boolean
   githubToken: string
@@ -416,10 +447,13 @@ interface AppState {
   resetPaneSize: (id: string) => void
   /** Drop size overrides for sessions that no longer exist. */
   prunePaneSizes: (liveIds: string[]) => void
+  /** Collapse/expand a terminal to a docked header bar. */
+  toggleSessionCollapsed: (id: string, v?: boolean) => void
   setPanelSide: (side: PanelSide) => void
   setPanelWidth: (width: number) => void
   togglePanel: (v?: boolean) => void
   togglePanelMaximized: (v?: boolean) => void
+  toggleTerminalGrid: (v?: boolean) => void
   setCodePanelTab: (tab: CodePanelTab) => void
   toggleSidebar: (v?: boolean) => void
   setStats: (s: SystemStats) => void
@@ -438,6 +472,17 @@ interface AppState {
   toggleComputerUse: (v?: boolean) => void
   /** Launch an AI CLI terminal primed to control the desktop via the tool. */
   startComputerUseSession: (modelId: string, toolPath: string) => void
+  toggleBoard: (v?: boolean) => void
+  /** Add a card to a board column for the active project. Returns its id. */
+  addBoardCard: (column: BoardColumnId, title: string) => string
+  updateBoardCard: (id: string, patch: Partial<Pick<BoardCard, 'title' | 'notes'>>) => void
+  removeBoardCard: (id: string) => void
+  /** Move a card to `column`, dropping it before `beforeId` (or at the end). */
+  moveBoardCard: (id: string, column: BoardColumnId, beforeId?: string) => void
+  /** Launch a new terminal session for a card and switch to the grid. */
+  launchCardSession: (cardId: string, modelId: string) => void
+  /** Focus a card's existing live session and switch to the grid. */
+  focusCardSession: (sessionId: string) => void
   toggleMobile: (v?: boolean) => void
   setGithubToken: (token: string) => void
   addAutomationFromTemplate: (template: AutomationTemplate) => string
@@ -532,6 +577,22 @@ function initialPanelMaximized(): boolean {
     return window.localStorage.getItem('gennal.panelMaximized') === 'true'
   } catch {
     return false
+  }
+}
+
+function initialTerminalGridHidden(): boolean {
+  try {
+    return window.localStorage.getItem('gennal.terminalGridHidden') === 'true'
+  } catch {
+    return false
+  }
+}
+
+function persistTerminalGridHidden(hidden: boolean): void {
+  try {
+    window.localStorage.setItem('gennal.terminalGridHidden', String(hidden))
+  } catch {
+    /* ignore storage errors */
   }
 }
 
@@ -641,6 +702,34 @@ function loadProjectSettings(): Record<string, ProjectSettings> {
 function saveProjectSettings(settings: Record<string, ProjectSettings>): void {
   try {
     window.localStorage.setItem(PROJECT_SETTINGS_STORAGE, JSON.stringify(settings))
+  } catch {
+    /* ignore storage errors */
+  }
+}
+
+const BOARD_CARDS_STORAGE = 'gennal.boardCards'
+
+function loadBoardCards(): BoardCard[] {
+  try {
+    const raw = window.localStorage.getItem(BOARD_CARDS_STORAGE)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter(
+      (c): c is BoardCard =>
+        !!c &&
+        typeof (c as BoardCard).id === 'string' &&
+        typeof (c as BoardCard).title === 'string' &&
+        typeof (c as BoardCard).column === 'string'
+    )
+  } catch {
+    return []
+  }
+}
+
+function saveBoardCards(cards: BoardCard[]): void {
+  try {
+    window.localStorage.setItem(BOARD_CARDS_STORAGE, JSON.stringify(cards))
   } catch {
     /* ignore storage errors */
   }
@@ -1151,10 +1240,12 @@ export const useStore = create<AppState>((set, get) => ({
   cols: 2,
   mode: 'grid',
   paneSizes: {},
+  collapsedIds: [],
   panelSide: initialPanelSide(),
   panelWidth: initialPanelWidth(),
   panelOpen: initialPanelOpen(),
   panelMaximized: initialPanelMaximized(),
+  terminalGridHidden: initialTerminalGridHidden(),
   codePanelTab: 'CODE',
   sidebarOpen: initialSidebarOpen(),
   stats: { cpu: 0, memUsedMB: 0, memTotalMB: 0 },
@@ -1168,6 +1259,8 @@ export const useStore = create<AppState>((set, get) => ({
   historyOpen: false,
   simulatorsOpen: false,
   computerUseOpen: false,
+  boardOpen: false,
+  boardCards: loadBoardCards(),
   githubToken: loadGithubToken(),
   automations: loadAutomations(),
   automationRuns: loadAutomationRuns(),
@@ -1246,9 +1339,12 @@ export const useStore = create<AppState>((set, get) => ({
     // CLI even with no project (it just starts in the home folder). The "Shell"
     // model has an empty command, so that's the way to a plain local terminal.
     const session = createSession(model, get().sessions.length, projectPath, projectPath)
+    persistTerminalGridHidden(false)
     set((s) => ({
       sessions: [...s.sessions, session],
-      activeId: s.terminalSettings.focusNewSessions ? session.id : s.activeId
+      activeId: s.terminalSettings.focusNewSessions ? session.id : s.activeId,
+      terminalGridHidden: false,
+      previewCenter: false
     }))
   },
 
@@ -1273,8 +1369,17 @@ export const useStore = create<AppState>((set, get) => ({
       const visibleCount = sessions.filter((x) => x.projectPath === source.projectPath).length
       const horizontal = direction === 'left' || direction === 'right'
       const grid = gridForSplit(visibleCount, horizontal)
+      persistTerminalGridHidden(false)
 
-      return { sessions, activeId: session.id, mode: 'grid', rows: grid.rows, cols: grid.cols }
+      return {
+        sessions,
+        activeId: session.id,
+        mode: 'grid',
+        rows: grid.rows,
+        cols: grid.cols,
+        terminalGridHidden: false,
+        previewCenter: false
+      }
     }),
 
   removeSession: (id) =>
@@ -1283,7 +1388,10 @@ export const useStore = create<AppState>((set, get) => ({
       const activeId = s.activeId === id ? (sessions[sessions.length - 1]?.id ?? null) : s.activeId
       const paneSizes = s.paneSizes[id] ? { ...s.paneSizes } : s.paneSizes
       if (paneSizes !== s.paneSizes) delete paneSizes[id]
-      return { sessions, activeId, paneSizes }
+      const collapsedIds = s.collapsedIds.includes(id)
+        ? s.collapsedIds.filter((x) => x !== id)
+        : s.collapsedIds
+      return { sessions, activeId, paneSizes, collapsedIds }
     }),
 
   moveSession: (fromId, toId) =>
@@ -1323,9 +1431,24 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => {
       const live = new Set(liveIds)
       const keys = Object.keys(s.paneSizes)
-      if (keys.every((id) => live.has(id))) return {}
-      const paneSizes = Object.fromEntries(keys.filter((id) => live.has(id)).map((id) => [id, s.paneSizes[id]]))
-      return { paneSizes }
+      const sizesStale = keys.some((id) => !live.has(id))
+      const collapsedStale = s.collapsedIds.some((id) => !live.has(id))
+      if (!sizesStale && !collapsedStale) return {}
+      const next: Partial<AppState> = {}
+      if (sizesStale) {
+        next.paneSizes = Object.fromEntries(keys.filter((id) => live.has(id)).map((id) => [id, s.paneSizes[id]]))
+      }
+      if (collapsedStale) next.collapsedIds = s.collapsedIds.filter((id) => live.has(id))
+      return next
+    }),
+  toggleSessionCollapsed: (id, v) =>
+    set((s) => {
+      const isCollapsed = s.collapsedIds.includes(id)
+      const next = v ?? !isCollapsed
+      if (next === isCollapsed) return {}
+      return {
+        collapsedIds: next ? [...s.collapsedIds, id] : s.collapsedIds.filter((x) => x !== id)
+      }
     }),
   setPanelSide: (panelSide) => {
     try {
@@ -1368,6 +1491,12 @@ export const useStore = create<AppState>((set, get) => ({
       }
       return { panelMaximized, panelOpen }
     }),
+  toggleTerminalGrid: (v) =>
+    set((s) => {
+      const terminalGridHidden = v ?? !s.terminalGridHidden
+      persistTerminalGridHidden(terminalGridHidden)
+      return { terminalGridHidden }
+    }),
   setCodePanelTab: (codePanelTab) => set({ codePanelTab }),
   toggleSidebar: (v) =>
     set((s) => {
@@ -1391,36 +1520,125 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => {
       const tasksOpen = v ?? !s.tasksOpen
       return tasksOpen
-        ? { tasksOpen, automationsOpen: false, historyOpen: false, simulatorsOpen: false, computerUseOpen: false }
+        ? { tasksOpen, automationsOpen: false, historyOpen: false, simulatorsOpen: false, computerUseOpen: false, boardOpen: false }
         : { tasksOpen }
     }),
   toggleAutomations: (v) =>
     set((s) => {
       const automationsOpen = v ?? !s.automationsOpen
       return automationsOpen
-        ? { automationsOpen, tasksOpen: false, historyOpen: false, simulatorsOpen: false, computerUseOpen: false }
+        ? { automationsOpen, tasksOpen: false, historyOpen: false, simulatorsOpen: false, computerUseOpen: false, boardOpen: false }
         : { automationsOpen }
     }),
   toggleHistory: (v) =>
     set((s) => {
       const historyOpen = v ?? !s.historyOpen
       return historyOpen
-        ? { historyOpen, tasksOpen: false, automationsOpen: false, simulatorsOpen: false, computerUseOpen: false }
+        ? { historyOpen, tasksOpen: false, automationsOpen: false, simulatorsOpen: false, computerUseOpen: false, boardOpen: false }
         : { historyOpen }
     }),
   toggleSimulators: (v) =>
     set((s) => {
       const simulatorsOpen = v ?? !s.simulatorsOpen
       return simulatorsOpen
-        ? { simulatorsOpen, tasksOpen: false, automationsOpen: false, historyOpen: false, computerUseOpen: false }
+        ? { simulatorsOpen, tasksOpen: false, automationsOpen: false, historyOpen: false, computerUseOpen: false, boardOpen: false }
         : { simulatorsOpen }
     }),
   toggleComputerUse: (v) =>
     set((s) => {
       const computerUseOpen = v ?? !s.computerUseOpen
       return computerUseOpen
-        ? { computerUseOpen, tasksOpen: false, automationsOpen: false, historyOpen: false, simulatorsOpen: false }
+        ? { computerUseOpen, tasksOpen: false, automationsOpen: false, historyOpen: false, simulatorsOpen: false, boardOpen: false }
         : { computerUseOpen }
+    }),
+  toggleBoard: (v) =>
+    set((s) => {
+      const boardOpen = v ?? !s.boardOpen
+      return boardOpen
+        ? { boardOpen, tasksOpen: false, automationsOpen: false, historyOpen: false, simulatorsOpen: false, computerUseOpen: false }
+        : { boardOpen }
+    }),
+  addBoardCard: (column, title) => {
+    const id = uidPrefixed('card')
+    set((s) => {
+      const projectPath = activeProjectPath(s.workspace)
+      const order =
+        s.boardCards
+          .filter((c) => c.projectPath === projectPath && c.column === column)
+          .reduce((m, c) => Math.max(m, c.order), -1) + 1
+      const card: BoardCard = {
+        id,
+        title: title.trim() || 'Untitled',
+        column,
+        projectPath,
+        createdAt: Date.now(),
+        order
+      }
+      const boardCards = [...s.boardCards, card]
+      saveBoardCards(boardCards)
+      return { boardCards }
+    })
+    return id
+  },
+  updateBoardCard: (id, patch) =>
+    set((s) => {
+      const boardCards = s.boardCards.map((c) => (c.id === id ? { ...c, ...patch } : c))
+      saveBoardCards(boardCards)
+      return { boardCards }
+    }),
+  removeBoardCard: (id) =>
+    set((s) => {
+      const boardCards = s.boardCards.filter((c) => c.id !== id)
+      saveBoardCards(boardCards)
+      return { boardCards }
+    }),
+  moveBoardCard: (id, column, beforeId) =>
+    set((s) => {
+      const card = s.boardCards.find((c) => c.id === id)
+      if (!card) return {}
+      // Rebuild the destination column (same project) in its new order, then
+      // renumber so `order` stays a clean 0..n sequence.
+      const dest = s.boardCards
+        .filter((c) => c.projectPath === card.projectPath && c.column === column && c.id !== id)
+        .sort((a, b) => a.order - b.order)
+      const moved: BoardCard = { ...card, column }
+      const at = beforeId ? dest.findIndex((c) => c.id === beforeId) : -1
+      if (at === -1) dest.push(moved)
+      else dest.splice(at, 0, moved)
+      const orderById = new Map(dest.map((c, i) => [c.id, i]))
+      const boardCards = s.boardCards.map((c) =>
+        orderById.has(c.id)
+          ? { ...(c.id === id ? moved : c), order: orderById.get(c.id) as number }
+          : c
+      )
+      saveBoardCards(boardCards)
+      return { boardCards }
+    }),
+  launchCardSession: (cardId, modelId) =>
+    set((s) => {
+      const model = s.models.find((m) => m.id === modelId)
+      if (!model) return {}
+      const projectPath = activeProjectPath(s.workspace)
+      const session = createSession(model, s.sessions.length, projectPath, projectPath)
+      const boardCards = s.boardCards.map((c) =>
+        c.id === cardId ? { ...c, sessionId: session.id, modelId } : c
+      )
+      saveBoardCards(boardCards)
+      persistTerminalGridHidden(false)
+      return {
+        sessions: [...s.sessions, session],
+        activeId: session.id,
+        boardCards,
+        terminalGridHidden: false,
+        previewCenter: false,
+        boardOpen: false
+      }
+    }),
+  focusCardSession: (sessionId) =>
+    set((s) => {
+      if (!s.sessions.some((x) => x.id === sessionId)) return {}
+      persistTerminalGridHidden(false)
+      return { activeId: sessionId, boardOpen: false, terminalGridHidden: false, previewCenter: false }
     }),
   bootSimulator: (emulator) =>
     set((s) => {
@@ -1735,6 +1953,7 @@ export const useStore = create<AppState>((set, get) => ({
         'gennal.panelWidth',
         'gennal.panelOpen',
         'gennal.panelMaximized',
+        'gennal.terminalGridHidden',
         'gennal.sidebarOpen'
       ])
       const toRemove: string[] = []
@@ -1746,7 +1965,7 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {
       /* ignore storage errors */
     }
-    set({ workspace: null, workspaceError: null, recentProjects: [], projectSettings: {}, imagePreview: null, runOutput: [], chatHistory: [] })
+    set({ workspace: null, workspaceError: null, recentProjects: [], projectSettings: {}, imagePreview: null, runOutput: [], chatHistory: [], boardCards: [] })
   },
 
   addChatHistoryEntry: (entry) => {

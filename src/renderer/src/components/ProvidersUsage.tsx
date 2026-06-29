@@ -1,29 +1,32 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store'
-import type { AgentSessionAgent, AgentSessionSummary } from '../../../shared/types'
+import type { AgentSessionAgent, AgentSessionSummary, ModelDef } from '../../../shared/types'
 
-interface ProviderDef {
-  agent: AgentSessionAgent
+interface Provider {
+  id: string
   name: string
   accent: string
-  /** Substrings (in a model id/command) that identify this provider. */
-  match: string[]
+  custom: boolean
+  /** Which session-log agent (if any) backs this model's stats. */
+  agent: AgentSessionAgent | null
 }
 
-const PROVIDERS: ProviderDef[] = [
-  { agent: 'claude', name: 'Claude', accent: '#D97757', match: ['claude'] },
-  { agent: 'codex', name: 'Codex', accent: '#10A37F', match: ['codex', 'gpt'] }
-]
-
 interface ProviderAgg {
-  def: ProviderDef
-  enabled: boolean
+  provider: Provider
   sessions: number
   turns: number
   tokens: number
   cost: number
   model?: string
   workspace?: string
+}
+
+/** Map a model definition onto the session-log agent that records its usage. */
+function detectAgent(m: ModelDef): AgentSessionAgent | null {
+  const hay = `${m.id} ${m.command} ${m.tag}`.toLowerCase()
+  if (hay.includes('claude')) return 'claude'
+  if (hay.includes('codex') || hay.includes('gpt')) return 'codex'
+  return null
 }
 
 function fmtTokens(n: number): string {
@@ -61,13 +64,12 @@ function basename(path?: string): string | undefined {
   return parts[parts.length - 1]
 }
 
-function aggregate(sessions: AgentSessionSummary[], def: ProviderDef, enabled: boolean): ProviderAgg {
-  const mine = sessions.filter((s) => s.agent === def.agent)
+function aggregate(sessions: AgentSessionSummary[], provider: Provider): ProviderAgg {
+  const mine = provider.agent ? sessions.filter((s) => s.agent === provider.agent) : []
   // Newest first so the "workspace" reflects the most recent project.
   const byRecent = [...mine].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
   return {
-    def,
-    enabled,
+    provider,
     sessions: mine.length,
     turns: mine.reduce((sum, s) => sum + (s.messageCount || 0), 0),
     tokens: mine.reduce((sum, s) => sum + (s.tokens || 0), 0),
@@ -92,53 +94,67 @@ export default function ProvidersUsage(): JSX.Element {
     }
   }, [])
 
+  // Every launchable AI CLI — built-in or user-added — becomes a provider. The
+  // bare shell (no command) is skipped since it has no model usage to report.
+  const providers = useMemo<Provider[]>(
+    () =>
+      models
+        .filter((m) => m.command.trim().length > 0)
+        .map((m) => ({
+          id: m.id,
+          name: m.label,
+          accent: m.accent,
+          custom: Boolean(m.custom),
+          agent: detectAgent(m)
+        })),
+    [models]
+  )
+
   const aggs = useMemo(() => {
     const list = sessions ?? []
-    return PROVIDERS.map((def) => {
-      const enabled = models.some((m) => {
-        const hay = `${m.id} ${m.command} ${m.tag}`.toLowerCase()
-        return def.match.some((needle) => hay.includes(needle))
-      })
-      return aggregate(list, def, enabled)
-    })
-  }, [sessions, models])
+    return providers.map((p) => aggregate(list, p))
+  }, [sessions, providers])
 
   if (sessions === null) {
     return <div className="providers-loading">Reading provider usage…</div>
   }
 
-  const enabledCount = aggs.filter((a) => a.enabled).length
   const withData = aggs.filter((a) => a.sessions > 0).length
   const maxTokens = Math.max(1, ...aggs.map((a) => a.tokens))
-  // Show providers that are enabled or have data; hide the truly absent.
-  const visible = aggs.filter((a) => a.enabled || a.sessions > 0)
 
   return (
     <div className="providers">
       <div className="providers-head">
         <h3>Providers</h3>
         <span className="providers-sub">
-          {enabledCount} enabled · {withData} with data
+          {aggs.length} model{aggs.length === 1 ? '' : 's'} · {withData} with data
         </span>
       </div>
 
       <div className="providers-list">
-        {visible.map((a) => {
+        {aggs.map((a) => {
           const hasData = a.sessions > 0
           const pct = hasData ? Math.max(3, Math.round((a.tokens / maxTokens) * 100)) : 0
           return (
-            <div className={`provider-card ${hasData ? '' : 'empty'}`} key={a.def.agent}>
+            <div className={`provider-card ${hasData ? '' : 'empty'}`} key={a.provider.id}>
               <div className="provider-card-head">
-                <span className="provider-name">{a.def.name}</span>
-                <span className={`provider-badge ${a.enabled ? 'on' : ''}`}>
-                  {a.enabled ? 'Enabled' : 'Off'}
+                <span className="provider-name">
+                  <span
+                    className="provider-swatch"
+                    style={{ background: a.provider.accent }}
+                    aria-hidden="true"
+                  />
+                  {a.provider.name}
+                </span>
+                <span className={`provider-badge ${hasData ? 'on' : ''}`}>
+                  {hasData ? 'Active' : a.provider.custom ? 'Added' : 'Ready'}
                 </span>
               </div>
 
               {hasData ? (
                 <>
                   <div className="provider-meta">
-                    {a.model || a.def.name}
+                    {a.model || a.provider.name}
                     {a.workspace ? ` · ${a.workspace}` : ''}
                   </div>
                   <div className="provider-stats">
@@ -150,20 +166,30 @@ export default function ProvidersUsage(): JSX.Element {
                     <span className="provider-cost">{fmtCost(a.cost)}</span>
                   </div>
                   <div className="provider-bar">
-                    <span style={{ width: `${pct}%`, background: a.def.accent }} />
+                    <span style={{ width: `${pct}%`, background: a.provider.accent }} />
                   </div>
                 </>
               ) : (
-                <div className="provider-meta">No usage data on this device yet.</div>
+                <div className="provider-meta">
+                  {a.provider.agent
+                    ? 'No usage data on this device yet.'
+                    : 'Launch a session to start tracking usage.'}
+                </div>
               )}
             </div>
           )
         })}
+        {aggs.length === 0 && (
+          <div className="provider-card empty">
+            <div className="provider-meta">No models configured yet.</div>
+          </div>
+        )}
       </div>
 
       <p className="remote-note">
-        Aggregated from local Claude &amp; Codex session logs (most recent 500 sessions). Cost is an estimate from token
-        usage × list pricing.
+        Token &amp; cost figures are aggregated from local Claude &amp; Codex session logs (most recent 500
+        sessions); other CLIs are listed without token counts. Cost is an estimate from token usage × list
+        pricing.
       </p>
     </div>
   )

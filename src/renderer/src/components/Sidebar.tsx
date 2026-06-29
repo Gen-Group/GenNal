@@ -277,6 +277,8 @@ export default function Sidebar(): JSX.Element {
   const stats = useStore((s) => s.stats)
   const tasksOpen = useStore((s) => s.tasksOpen)
   const toggleTasks = useStore((s) => s.toggleTasks)
+  const boardOpen = useStore((s) => s.boardOpen)
+  const toggleBoard = useStore((s) => s.toggleBoard)
   const automationsOpen = useStore((s) => s.automationsOpen)
   const toggleAutomations = useStore((s) => s.toggleAutomations)
   const historyOpen = useStore((s) => s.historyOpen)
@@ -536,6 +538,19 @@ export default function Sidebar(): JSX.Element {
             </svg>
           </span>
           <span className="nav-label">Tasks</span>
+        </button>
+        <button
+          className={`side-nav-item ${boardOpen ? 'active' : ''}`}
+          title="Workspace board — Kanban for this project"
+          onClick={() => toggleBoard(true)}
+        >
+          <span className="nav-ico" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2.5" width="12" height="11" rx="1.5" />
+              <path d="M6 2.5v11M10 2.5v11" />
+            </svg>
+          </span>
+          <span className="nav-label">Board</span>
         </button>
         <button
           className={`side-nav-item ${automationsOpen ? 'active' : ''}`}
