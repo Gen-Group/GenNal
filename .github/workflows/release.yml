@@ -1,0 +1,48 @@
+name: Build & Release
+
+# Builds the Windows and Linux installers on their native runners and
+# publishes them to the GitHub Release for the pushed tag (e.g. v1.0.12).
+# macOS dmgs are built and shipped separately, so they are not built here.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            build: npm run build && npx electron-builder --win
+            artifacts: 'dist/*.exe'
+          - os: ubuntu-latest
+            build: npm run build && npx electron-builder --linux AppImage
+            artifacts: 'dist/*.AppImage'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build installer
+        run: ${{ matrix.build }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifacts }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
